@@ -1,4 +1,4 @@
-import type { Design, Item, Pt, Room, Wall } from '../types'
+import type { Design, Item, Pt, Room, Wall, WallSide } from '../types'
 import { pointInPolygon, projectOnSegment, wallLength } from './geometry'
 
 /**
@@ -78,4 +78,28 @@ export function roomDesign(design: Design, room: Room): Design {
     rooms: [room],
     items: design.items.filter((it) => itemInRoom(it, room.points)),
   }
+}
+
+/** Point just off one face of a wall, at the middle of the given stretch. */
+function besideWall(w: Wall, side: WallSide, at: number): Pt {
+  const len = wallLength(w) || 1
+  const ux = (w.b.x - w.a.x) / len
+  const uy = (w.b.y - w.a.y) / len
+  const k = (side === 'a' ? 1 : -1) * (w.thickness / 2 + 0.08)
+  return { x: w.a.x + ux * at - uy * k, y: w.a.y + uy * at + ux * k }
+}
+
+/** The faces of a wall that look into the room: one for a boundary wall, both for a wall standing inside it. */
+export function roomSides(w: Wall, poly: Pt[]): WallSide[] {
+  const span = wallSpan(w, poly)
+  if (!span) return []
+  const at = (span[0] + span[1]) / 2
+  return (['a', 'b'] as const).filter((side) => pointInPolygon(besideWall(w, side, at), poly))
+}
+
+/** The room each face of a wall looks into, if any. */
+export function roomsBeside(w: Wall, rooms: Room[]): Record<WallSide, Room | undefined> {
+  const at = wallLength(w) / 2
+  const find = (side: WallSide) => rooms.find((r) => pointInPolygon(besideWall(w, side, at), r.points))
+  return { a: find('a'), b: find('b') }
 }

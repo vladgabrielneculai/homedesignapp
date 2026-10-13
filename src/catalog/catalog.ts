@@ -268,6 +268,31 @@ export function getEntry(id: string): CatalogEntry {
   return BY_ID.get(id) ?? userEntries.get(id) ?? MISSING
 }
 
+type Sized = { catalogId: string; w?: number; d?: number; h?: number }
+const sizedCache = new WeakMap<CatalogEntry, Map<string, CatalogEntry>>()
+
+/**
+ * The catalog entry for a placed item, with the item's custom size applied. Results are cached so the
+ * same size always gives the same object (3D models are only re-fitted when the size really changes).
+ */
+export function itemEntry(it: Sized): CatalogEntry {
+  const e = getEntry(it.catalogId)
+  if (it.w === undefined && it.d === undefined && it.h === undefined) return e
+  let byKey = sizedCache.get(e)
+  if (!byKey) sizedCache.set(e, (byKey = new Map()))
+  const key = `${it.w}|${it.d}|${it.h}`
+  let sized = byKey.get(key)
+  if (!sized) {
+    const h = it.h ?? e.h
+    sized = { ...e, w: it.w ?? e.w, d: it.d ?? e.d, h, surface: e.surface !== undefined ? (e.surface * h) / e.h : undefined }
+    byKey.set(key, sized)
+  }
+  return sized
+}
+
+export const MIN_SIZE = 0.05
+export const MAX_SIZE = 12
+
 /** Built-in shapes a shop product can be drawn as, keyed by generator id. */
 export const PRODUCT_SHAPES: { id: string; label: string }[] = [
   { id: 'sofa3', label: 'Sofa' },

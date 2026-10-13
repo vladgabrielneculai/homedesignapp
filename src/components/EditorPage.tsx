@@ -7,6 +7,7 @@ import { capture3D, Viewer3D } from '../three/Viewer3D'
 import type { ViewMode } from '../types'
 import { Editor2D, planSvgs } from './Editor2D'
 import { deleteSelection, duplicateSelectedItem, nudgeSelectedItem, PropertiesPanel, rotateSelectedItem } from './PropertiesPanel'
+import { PhotoDialog } from './PhotoDialog'
 import { ShoppingList } from './ShoppingList'
 import { Sidebar } from './Sidebar'
 import { MiniPlan } from './TemplatePreview'
@@ -84,6 +85,7 @@ export function EditorPage() {
   const { openProject, renameProject, setViewMode, undo, redo, select, focusRoom } = useStore.getState()
   const [menuOpen, setMenuOpen] = useState(false)
   const [shopping, setShopping] = useState(false)
+  const [photo, setPhoto] = useState<string | null>(null)
   useShortcuts()
 
   // Refresh the project thumbnail a few seconds after edits settle.
@@ -165,13 +167,16 @@ export function EditorPage() {
           </button>
           {menuOpen && (
             <div className="menu" onClick={() => setMenuOpen(false)}>
+              <button onClick={() => setPhoto('main')} disabled={viewMode === '2d' || viewMode === 'compare'}>
+                Photo-realistic image…
+              </button>
               <button onClick={export3D} disabled={viewMode === '2d' || viewMode === 'compare'}>
                 3D view as PNG
               </button>
               <button onClick={exportPlan} disabled={viewMode === '3d' || viewMode === 'compare'}>
                 Floor plan as PNG
               </button>
-              <button onClick={() => exportProjectJson(project, useStore.getState().products)}>Project file (.json)</button>
+              <button onClick={() => exportProjectJson(project, useStore.getState())}>Project file (.json)</button>
             </div>
           )}
         </div>
@@ -207,6 +212,7 @@ export function EditorPage() {
                       id="main"
                       design={shown}
                       singleRoom={!!focus}
+                      onPhoto={setPhoto}
                       frameKey={frameKey}
                       selectedItemId={selection?.kind === 'item' ? selection.id : null}
                       onSelectItem={(id) => select(id ? { kind: 'item', id } : null)}
@@ -220,6 +226,7 @@ export function EditorPage() {
         {viewMode !== 'compare' && <PropertiesPanel />}
       </div>
       <VariantsBar />
+      {photo && <PhotoDialog viewId={photo} name={`${project.name}-${viewName}`} onClose={() => setPhoto(null)} />}
       {shopping && <ShoppingList design={shown} title={`${project.name} – ${variant.name}${focus ? ` – ${focus.name}` : ''}`} onClose={() => setShopping(false)} />}
     </div>
   )

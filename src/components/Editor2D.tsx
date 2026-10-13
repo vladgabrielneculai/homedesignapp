@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getEntry, surfaceHeight } from '../catalog/catalog'
+import { getEntry, itemEntry, MAX_SIZE, MIN_SIZE, surfaceHeight, type CatalogEntry } from '../catalog/catalog'
 import { getFloor } from '../catalog/styles'
 import { makeOpening, makeRectRoom, WALL_HEIGHT, WALL_THICKNESS } from '../catalog/templates'
 import { itemColor } from '../lib/colors'
@@ -21,9 +21,12 @@ import {
   wallLength,
 } from '../lib/geometry'
 import { itemInRoom, wallSpan } from '../lib/roomFocus'
+import { finishColor } from '../catalog/wallFinishes'
+import { compassName } from '../lib/sun'
+import { useBlobUrl } from '../lib/underlay'
 import { useDesign, useFocusRoom, useProject, useStore } from '../state/store'
 import { floorPatternUrl } from '../three/textures'
-import type { Design, Opening, Pt, Room, Wall } from '../types'
+import type { Design, Item, Opening, Pt, Room, Wall } from '../types'
 import { PlanSymbol } from './PlanSymbol'
 
 const GRID = 0.1
@@ -43,9 +46,11 @@ type Drag =
   | { kind: 'pan'; sx: number; sy: number; view: View }
   | { kind: 'item'; id: string; dx: number; dy: number; moved: boolean }
   | { kind: 'rotate'; id: string }
+  | { kind: 'resize'; id: string; sx: boolean; sy: boolean; c0: Pt; w0: number; d0: number; rot: number; moved: boolean }
   | { kind: 'endpoint'; ends: { wallId: string; end: 'a' | 'b' }[]; roomPts: { roomId: string; index: number }[]; moved: boolean }
   | { kind: 'opening'; id: string; moved: boolean }
   | { kind: 'roomRect'; start: Pt }
+  | { kind: 'underlay'; start: Pt; x0: number; y0: number; moved: boolean }
 
 const deg = (r: number) => (r * 180) / Math.PI
 
@@ -53,8 +58,7 @@ const deg = (r: number) => (r * 180) / Math.PI
  * Where a wall-mounted item dropped near p should go: flat against the closest wall (within 1.5 m),
  * kept inside the wall's length and facing into the room on the side the cursor is on.
  */
-function wallSnap(design: Design, p: Pt, catalogId: string): { x: number; y: number; rotation: number } | null {
-  const e = getEntry(catalogId)
+function wallSnap(design: Design, p: Pt, e: CatalogEntry): { x: number; y: number; rotation: number } | null {
   if (e.mount !== 'wall') return null
   const hit = nearestWall(p, design.walls, 1.5)
   if (!hit) return null
@@ -84,7 +88,7 @@ function elevationAt(design: Design, p: Pt, catalogId: string, ignoreId?: string
   let h = 0
   for (const it of design.items) {
     if (it.id === ignoreId) continue
-    const e = getEntry(it.catalogId)
+    const e = itemEntry(it)
     const top = surfaceHeight(e)
     if (top !== null && inFootprint(p, it, e.w, e.d, it.rotation)) h = Math.max(h, (it.elevation ?? 0) + top)
   }
@@ -92,7 +96,14 @@ function elevationAt(design: Design, p: Pt, catalogId: string, ignoreId?: string
 }
 
 function fitView(design: Design, w: number, h: number, room?: Room): View {
-  const pts = room ? room.points : [...design.walls.flatMap((x) => [x.a, x.b]), ...design.items.map((i) => ({ x: i.x, y: i.y }))]
+  let pts = room ? room.points : [...design.walls.flatMap((x) => [x.a, x.b]), ...design.items.map((i) => ({ x: i.x, y: i.y }))]
+  const u = design.underlay
+  // With nothing drawn yet, frame the imported plan instead.
+  if (!room && !design.walls.length && u?.visible)
+    pts = [
+      { x: u.x, y: u.y },
+      { x: u.x + u.w * u.scale, y: u.y + u.h * u.scale },
+    ]
   if (!pts.length) return { cx: 5, cy: 4, scale: 60 }
   const b = bounds(pts)
   const pad = 1.2
@@ -147,6 +158,9 @@ export function Editor2D() {
   const [cursor, setCursor] = useState<Pt | null>(null)
   const [chain, setChain] = useState<Pt[]>([]) // wall tool points
   const [rect, setRect] = useState<{ a: Pt; b: Pt } | null>(null)
+  const [calib, setCalib] = useState<Pt[]>([]) // scale tool: two points on the imported plan
+  const [calibDist, setCalibDist] = useState('')
+  const underlayUrl = useBlobUrl(fullDesign?.underlay?.key)
   const drag = useRef<Drag | null>(null)
   const spaceDown = useRef(false)
 
@@ -182,6 +196,8 @@ export function Editor2D() {
   useEffect(() => {
     setChain([])
     setRect(null)
+    setCalib([])
+    setCalibDist('')
   }, [tool])
 
   const toWorld = useCallback(
@@ -204,7 +220,8 @@ export function Editor2D() {
       if (e.key === ' ') spaceDown.current = e.type === 'keydown'
       if (e.type !== 'keydown') return
       if (e.key === 'Escape') {
-        if (chain.length) finishChain()
+        if (calib.length) setCalib([])
+        else if (chain.length) finishChain()
         else if (rect) setRect(null)
         else if (tool !== 'select') setTool('select')
         else select(null)
@@ -217,7 +234,7 @@ export function Editor2D() {
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('keyup', onKey)
     }
-  }, [chain, rect, tool, finishChain, setTool, select])
+  }, [chain, rect, calib, tool, finishChain, setTool, select])
 
   // Wheel zoom (non-passive so we can prevent page scroll).
   useEffect(() => {
@@ -252,7 +269,7 @@ export function Editor2D() {
   const placeItemAt = (catalogId: string, p: Pt) => {
     const id = uid()
     const snapped = snapPt(p, grid ? 0.05 : 0)
-    const onWall = wallSnap(design, p, catalogId)
+    const onWall = wallSnap(design, p, getEntry(catalogId))
     const at = onWall ?? { ...snapped, rotation: 0 }
     const elevation = elevationAt(design, at, catalogId) ?? getEntry(catalogId).defaultElevation
     updateDesign((d) => ({ ...d, items: [...d.items, { id, catalogId, x: at.x, y: at.y, rotation: at.rotation, elevation }] }))
@@ -303,6 +320,14 @@ export function Editor2D() {
         drag.current = { kind: 'roomRect', start: a }
         break
       }
+      case 'calibrate':
+        if (calib.length < 2) setCalib([...calib, p])
+        break
+      case 'moveUnderlay': {
+        const u = design.underlay
+        if (u) drag.current = { kind: 'underlay', start: p, x0: u.x, y0: u.y, moved: false }
+        break
+      }
       case 'door':
       case 'window': {
         const hit = nearestWall(p, design.walls, 0.5)
@@ -339,7 +364,7 @@ export function Editor2D() {
             ...d,
             items: d.items.map((it) => {
               if (it.id !== dr.id) return it
-              const onWall = wallSnap(d, { x: p.x - dr.dx, y: p.y - dr.dy }, it.catalogId)
+              const onWall = wallSnap(d, { x: p.x - dr.dx, y: p.y - dr.dy }, itemEntry(it))
               if (onWall) return { ...it, ...onWall }
               return { ...it, x, y, elevation: getEntry(it.catalogId).tabletop ? elevationAt(d, { x, y }, it.catalogId, it.id) : it.elevation }
             }),
@@ -355,6 +380,36 @@ export function Editor2D() {
         a = e.shiftKey ? Math.round(a) : Math.round(a / 15) * 15
         a = ((a % 360) + 360) % 360
         updateDesign((d) => ({ ...d, items: d.items.map((x) => (x.id === dr.id ? { ...x, rotation: a } : x)) }), { record: false })
+        break
+      }
+      case 'resize': {
+        if (!dr.moved) {
+          checkpoint()
+          dr.moved = true
+        }
+        // Work in the item's own frame; the opposite edge stays where it is.
+        const r = (dr.rot * Math.PI) / 180
+        const cos = Math.cos(r)
+        const sin = Math.sin(r)
+        const dx = p.x - dr.c0.x
+        const dy = p.y - dr.c0.y
+        const lx = dx * cos + dy * sin
+        const ly = -dx * sin + dy * cos
+        const step = grid ? 0.05 : 0.01
+        const fit = (v: number) => Math.max(MIN_SIZE, Math.min(MAX_SIZE, snap(v, step)))
+        const w = dr.sx ? fit(lx + dr.w0 / 2) : dr.w0
+        const dd = dr.sy ? fit(ly + dr.d0 / 2) : dr.d0
+        const ox = (w - dr.w0) / 2
+        const oy = (dd - dr.d0) / 2
+        const x = dr.c0.x + ox * cos - oy * sin
+        const y = dr.c0.y + ox * sin + oy * cos
+        updateDesign(
+          (d) => ({
+            ...d,
+            items: d.items.map((it) => (it.id === dr.id ? { ...it, x, y, ...(dr.sx ? { w } : {}), ...(dr.sy ? { d: dd } : {}) } : it)),
+          }),
+          { record: false },
+        )
         break
       }
       case 'endpoint': {
@@ -411,6 +466,16 @@ export function Editor2D() {
       case 'roomRect': {
         const b = snapToEndpoints(p, design.walls, px(12), grid)
         setRect({ a: dr.start, b })
+        break
+      }
+      case 'underlay': {
+        if (!dr.moved) {
+          checkpoint()
+          dr.moved = true
+        }
+        const x = dr.x0 + p.x - dr.start.x
+        const y = dr.y0 + p.y - dr.start.y
+        updateDesign((d) => (d.underlay ? { ...d, underlay: { ...d.underlay, x, y } } : d), { record: false })
         break
       }
     }
@@ -527,6 +592,21 @@ export function Editor2D() {
         <g transform={`translate(${size.w / 2} ${size.h / 2}) scale(${s}) translate(${-view.cx} ${-view.cy})`}>
           <rect x={view.cx - size.w / s / 2} y={view.cy - size.h / s / 2} width={size.w / s} height={size.h / s} fill="url(#grid-major)" />
 
+          {/* Imported floor plan to trace over */}
+          {design.underlay?.visible && underlayUrl && (
+            <image
+              href={underlayUrl}
+              x={design.underlay.x}
+              y={design.underlay.y}
+              width={design.underlay.w * design.underlay.scale}
+              height={design.underlay.h * design.underlay.scale}
+              opacity={design.underlay.opacity}
+              preserveAspectRatio="none"
+              pointerEvents="none"
+              className="underlay-img"
+            />
+          )}
+
           {/* Rooms */}
           {design.rooms.map((r) => {
             const selected = sel?.kind === 'room' && sel.id === r.id
@@ -566,6 +646,23 @@ export function Editor2D() {
                     select({ kind: 'wall', id: w.id })
                   }}
                 />
+                {/* thin strip on each face that has its own finish */}
+                {(['a', 'b'] as const).map((side) => {
+                  const f = w.sides?.[side]
+                  if (!f) return null
+                  const t = Math.min(px(4), w.thickness * 0.4)
+                  return (
+                    <rect
+                      key={side}
+                      x={from}
+                      y={side === 'a' ? w.thickness / 2 - t : -w.thickness / 2}
+                      width={to - from}
+                      height={t}
+                      fill={finishColor(f, design.style, () => '#b9a789')}
+                      pointerEvents="none"
+                    />
+                  )
+                })}
               </g>
             )
           })}
@@ -596,7 +693,7 @@ export function Editor2D() {
           {[...design.items]
             .sort((a, b) => layer(a) - layer(b))
             .map((it) => {
-              const entry = getEntry(it.catalogId)
+              const entry = itemEntry(it)
               const selected = sel?.kind === 'item' && sel.id === it.id
               return (
                 <g
@@ -647,6 +744,20 @@ export function Editor2D() {
                 ;(e.target as Element).setPointerCapture?.(e.pointerId)
                 checkpoint()
                 drag.current = { kind: 'rotate', id: selectedItem.id }
+              }}
+            />
+          )}
+
+          {/* Resize handles for the selected item */}
+          {selectedItem && tool === 'select' && (
+            <ResizeHandles
+              item={selectedItem}
+              px={px}
+              onPointerDown={(e, sx, sy) => {
+                e.stopPropagation()
+                ;(e.target as Element).setPointerCapture?.(e.pointerId)
+                const en = itemEntry(selectedItem)
+                drag.current = { kind: 'resize', id: selectedItem.id, sx, sy, c0: { x: selectedItem.x, y: selectedItem.y }, w0: en.w, d0: en.d, rot: selectedItem.rotation, moved: false }
               }}
             />
           )}
@@ -706,6 +817,21 @@ export function Editor2D() {
             </>
           )}
 
+          {/* Scale tool: the measured line */}
+          {tool === 'calibrate' && (
+            <g pointerEvents="none">
+              {calib.length === 1 && cursor && <line x1={calib[0].x} y1={calib[0].y} x2={cursor.x} y2={cursor.y} stroke="#e8590c" strokeWidth={px(2)} strokeDasharray={`${px(6)} ${px(4)}`} />}
+              {calib.length === 2 && <line x1={calib[0].x} y1={calib[0].y} x2={calib[1].x} y2={calib[1].y} stroke="#e8590c" strokeWidth={px(2.5)} />}
+              {calib.map((q, i) => (
+                <g key={i}>
+                  <circle cx={q.x} cy={q.y} r={px(6)} fill="none" stroke="#e8590c" strokeWidth={px(2)} />
+                  <line x1={q.x - px(10)} y1={q.y} x2={q.x + px(10)} y2={q.y} stroke="#e8590c" strokeWidth={px(1)} />
+                  <line x1={q.x} y1={q.y - px(10)} x2={q.x} y2={q.y + px(10)} stroke="#e8590c" strokeWidth={px(1)} />
+                </g>
+              ))}
+            </g>
+          )}
+
           {/* Door / window hover preview */}
           {hoverWall && (tool === 'door' || tool === 'window') && (
             <OpeningSymbol
@@ -726,7 +852,56 @@ export function Editor2D() {
         </g>
       </svg>
       <ScaleBar scale={s} />
-      <div className="plan-hint">{hintFor(tool, chain.length > 0, !!focus, design.rooms.length > 0)}</div>
+      <div className="plan-compass" title={`North · the top of the plan faces ${compassName(fullDesign?.site?.north ?? 0)}. Change it in the 3D view's sun panel.`}>
+        <svg viewBox="-20 -20 40 40" width="40" height="40" aria-hidden="true">
+          <circle r="18" fill="rgba(255,255,255,0.92)" stroke="#d3d8dd" />
+          <g transform={`rotate(${-(fullDesign?.site?.north ?? 0)})`}>
+            <path d="M0 -14 L4 1 L0 -2 L-4 1 Z" fill="#d9534f" />
+            <path d="M0 14 L4 1 L0 4 L-4 1 Z" fill="#9aa1a8" />
+            <text y="-15.5" textAnchor="middle" fontSize="7" fontWeight="700" fill="#2b2f33" transform="translate(0 -1)">
+              N
+            </text>
+          </g>
+        </svg>
+      </div>
+      <div className="plan-hint">{tool === 'calibrate' ? calibHint(calib.length) : hintFor(tool, chain.length > 0, !!focus, design.rooms.length > 0)}</div>
+      {tool === 'calibrate' && calib.length === 2 && (
+        <form
+          className="calib-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const real = parseFloat(calibDist.replace(',', '.'))
+            const measured = dist(calib[0], calib[1])
+            if (!(real > 0) || measured < 1e-6) return
+            const k = real / measured
+            const [a] = calib
+            // Rescale around the first point so it stays where it is.
+            updateDesign((d) =>
+              d.underlay
+                ? { ...d, underlay: { ...d.underlay, scale: d.underlay.scale * k, x: a.x - (a.x - d.underlay.x) * k, y: a.y - (a.y - d.underlay.y) * k, calibrated: true } }
+                : d,
+            )
+            setTool('select')
+            fittedFor.current = '' // re-frame around the rescaled plan
+          }}
+        >
+          <label>
+            Real distance between the two points
+            <span className="input-row">
+              <input className="input" autoFocus inputMode="decimal" placeholder="e.g. 4.20" value={calibDist} onChange={(e) => setCalibDist(e.target.value)} />
+              <em>m</em>
+            </span>
+          </label>
+          <div className="btn-row">
+            <button type="button" className="btn small" onClick={() => setCalib([])}>
+              Measure again
+            </button>
+            <button type="submit" className="btn small primary">
+              Set scale
+            </button>
+          </div>
+        </form>
+      )}
       <div className="zoom-buttons">
         <button onClick={() => setView((v) => ({ ...v, scale: Math.min(MAX_SCALE, v.scale * 1.25) }))} title="Zoom in">
           +
@@ -743,7 +918,7 @@ export function Editor2D() {
 }
 
 function ghostTransform(design: Design, cursor: Pt, catalogId: string, grid: number): string {
-  const onWall = wallSnap(design, cursor, catalogId)
+  const onWall = wallSnap(design, cursor, getEntry(catalogId))
   if (onWall) return `translate(${onWall.x} ${onWall.y}) rotate(${onWall.rotation})`
   return `translate(${snap(cursor.x, grid ? 0.05 : 0)} ${snap(cursor.y, grid ? 0.05 : 0)})`
 }
@@ -751,6 +926,12 @@ function ghostTransform(design: Design, cursor: Pt, catalogId: string, grid: num
 /** Draw order in the plan: rugs at the bottom, raised items (lamps on tables) on top. */
 function layer(it: { catalogId: string; elevation?: number }): number {
   return getEntry(it.catalogId).symbol === 'rug' ? -1 : (it.elevation ?? 0)
+}
+
+function calibHint(points: number): string {
+  if (points === 0) return 'Set scale: click the start of a distance you know on the imported plan (e.g. a dimensioned wall)'
+  if (points === 1) return 'Now click the end of that distance'
+  return 'Type the real length below'
 }
 
 function hintFor(tool: string, drawing: boolean, focused: boolean, hasRooms: boolean): string {
@@ -765,6 +946,8 @@ function hintFor(tool: string, drawing: boolean, focused: boolean, hasRooms: boo
       return 'Click on a wall to add a window'
     case 'place':
       return 'Click to place · hold Shift to place several · Esc to cancel'
+    case 'moveUnderlay':
+      return 'Drag to move the imported plan · Esc when done'
     default:
       if (focused) return 'Only this room is shown · drag items to move · R rotates · Del deletes'
       return `Drag to pan · scroll to zoom · drag items to move${hasRooms ? ' · double-click a room to edit it alone' : ''}`
@@ -809,8 +992,8 @@ function OpeningSymbol({
   )
 }
 
-function RotateHandle({ item, px, onPointerDown }: { item: { x: number; y: number; rotation: number; catalogId: string }; px: (n: number) => number; onPointerDown: (e: React.PointerEvent) => void }) {
-  const e = getEntry(item.catalogId)
+function RotateHandle({ item, px, onPointerDown }: { item: Item; px: (n: number) => number; onPointerDown: (e: React.PointerEvent) => void }) {
+  const e = itemEntry(item)
   const r = (item.rotation * Math.PI) / 180
   const reach = e.d / 2 + px(22)
   // handle sits behind the item's back edge
@@ -826,6 +1009,46 @@ function RotateHandle({ item, px, onPointerDown }: { item: { x: number; y: numbe
         ↻
       </text>
     </g>
+  )
+}
+
+/** Square handles on the right edge, front edge and front-right corner of the selected item. */
+function ResizeHandles({ item, px, onPointerDown }: { item: Item; px: (n: number) => number; onPointerDown: (e: React.PointerEvent, sx: boolean, sy: boolean) => void }) {
+  const e = itemEntry(item)
+  const s = px(9)
+  const handles: [number, number, boolean, boolean, string][] = [
+    [e.w / 2, 0, true, false, 'ew-resize'],
+    [0, e.d / 2, false, true, 'ns-resize'],
+    [e.w / 2, e.d / 2, true, true, 'nwse-resize'],
+  ]
+  // Size label kept upright, just below the item's bounding circle.
+  const below = Math.hypot(e.w, e.d) / 2 + px(16)
+  return (
+    <>
+      <text x={item.x} y={item.y + below} textAnchor="middle" fontSize={px(11)} fill="#2f80ed" fontWeight={600} stroke="#ffffff" strokeWidth={px(3)} paintOrder="stroke" pointerEvents="none">
+        {Math.round(e.w * 100)} × {Math.round(e.d * 100)} × {Math.round(e.h * 100)} cm
+      </text>
+      <g transform={`translate(${item.x} ${item.y}) rotate(${item.rotation})`}>
+        {handles.map(([x, y, sx, sy, cursor], i) => (
+          <rect
+            key={i}
+            x={x + (sx ? px(4) : 0) - s / 2}
+            y={y + (sy ? px(4) : 0) - s / 2}
+            width={s}
+            height={s}
+            rx={px(2)}
+            fill="#ffffff"
+            stroke="#2f80ed"
+            strokeWidth={px(2)}
+            className="handle"
+            style={{ cursor }}
+            onPointerDown={(ev) => onPointerDown(ev, sx, sy)}
+          >
+            <title>Drag to resize</title>
+          </rect>
+        ))}
+      </g>
+    </>
   )
 }
 

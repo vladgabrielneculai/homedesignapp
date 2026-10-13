@@ -11,8 +11,37 @@ export interface Wall {
   b: Pt
   thickness: number
   height: number
-  /** Optional per-wall paint; falls back to the design style's wall color. */
+  /** Older per-wall paint for both sides; per-side finishes (below) take precedence. */
   color?: string
+  /**
+   * Finish of each face. Side 'a' faces along the normal (-sin θ, cos θ) of the direction a→b,
+   * side 'b' the other way. Unset sides use `color`, then the style's wall color.
+   */
+  sides?: { a?: WallFinish; b?: WallFinish }
+}
+
+export type WallSide = 'a' | 'b'
+
+export type WallFinish =
+  | { kind: 'paint'; color: string }
+  /** A built-in wallpaper or material (see catalog/wallFinishes), optionally recolored. */
+  | { kind: 'pattern'; id: string; color?: string }
+  /** A wallpaper image the user uploaded (see Wallpaper). */
+  | { kind: 'image'; id: string }
+
+/** A wallpaper or tile photo uploaded by the user, stored in IndexedDB. */
+export interface Wallpaper {
+  id: string
+  name: string
+  /** IndexedDB key of the image. */
+  key: string
+  /** Small JPEG data URL for swatches. */
+  thumb: string
+  /** Real width of one repeat of the image, in meters (height follows the image's aspect ratio). */
+  width: number
+  /** Image aspect ratio (height / width). */
+  aspect: number
+  createdAt: number
 }
 
 export type OpeningType = 'door' | 'window'
@@ -48,6 +77,10 @@ export interface Item {
   color?: string
   /** Height above the floor in meters, e.g. a lamp on a side table. */
   elevation?: number
+  /** Custom size in meters (width, depth, height), overriding the catalog size. */
+  w?: number
+  d?: number
+  h?: number
 }
 
 export type FloorId = 'oak' | 'walnut' | 'whiteOak' | 'tile' | 'marble' | 'concrete' | 'carpet' | 'terracotta'
@@ -72,6 +105,40 @@ export interface Design {
   rooms: Room[]
   items: Item[]
   style: StyleSettings
+  /** Where the home is and which way it faces, for real sun positions. */
+  site?: Site
+  /** An imported floor plan image shown under the drawing, for tracing. */
+  underlay?: Underlay
+}
+
+export interface Underlay {
+  /** IndexedDB key of the image. */
+  key: string
+  name: string
+  /** Image size in pixels. */
+  w: number
+  h: number
+  /** Plan position of the image's top-left corner, in meters. */
+  x: number
+  y: number
+  /** Meters per image pixel. */
+  scale: number
+  opacity: number
+  visible: boolean
+  /** Whether the scale has been set from a known distance. */
+  calibrated: boolean
+}
+
+export interface Site {
+  /** City from lib/sun CITIES, or undefined for custom coordinates. */
+  city?: string
+  lat: number
+  lon: number
+  /** Standard UTC offset in hours and daylight-saving rule. */
+  utc: number
+  dst: 'eu' | 'us' | 'au' | 'nz' | 'none'
+  /** Compass bearing of the plan's "up" direction, in degrees (0 = up is north). */
+  north: number
 }
 
 export interface Variant {
@@ -91,7 +158,7 @@ export interface Project {
   thumbnail?: string
 }
 
-export type Tool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'place'
+export type Tool = 'select' | 'wall' | 'room' | 'door' | 'window' | 'place' | 'calibrate' | 'moveUnderlay'
 
 export type Selection =
   | { kind: 'item'; id: string }

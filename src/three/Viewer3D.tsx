@@ -2,13 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
-import { EffectComposer, N8AO, SMAA, ToneMapping } from '@react-three/postprocessing'
+import { Bloom, EffectComposer, N8AO, SMAA, ToneMapping } from '@react-three/postprocessing'
 import { ToneMappingMode } from 'postprocessing'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import { getEntry } from '../catalog/catalog'
+import { itemEntry } from '../catalog/catalog'
 import { bounds, pointInPolygon, polygonArea, polygonCentroid } from '../lib/geometry'
 import type { Design, Pt } from '../types'
 import { HouseScene, LocalEnvironment, RoomLights, SunLight } from './HouseScene'
+import { computeSun, defaultSite, Garden, Ground, horizonColor, SkyDome, type SunState, type SunTime } from './Outdoors'
+import { dayOfYear, formatHour, MONTHS } from '../lib/sun'
+import { SunPanel } from '../components/SunPanel'
+
+const MOON = new THREE.Vector3(0.4, 0.8, 0.45).normalize()
 
 /** Canvases register here so toolbar buttons can grab a PNG of any open 3D view. */
 const canvases = new Map<string, HTMLCanvasElement>()
@@ -50,7 +55,7 @@ function standingSpot(design: Design, poly: Pt[]): Pt {
       if (!pointInPolygon(p, poly)) continue
       let clear = Math.min(x - b.minX, b.maxX - x, y - b.minY, b.maxY - y)
       for (const it of design.items) {
-        const e = getEntry(it.catalogId)
+        const e = itemEntry(it)
         if (e.symbol === 'rug' || (it.elevation ?? 0) > 1.8) continue
         clear = Math.min(clear, Math.hypot(it.x - x, it.y - y) - Math.max(e.w, e.d) / 2)
       }
@@ -90,7 +95,7 @@ function CameraRig({ frame, eyeLevel, steep, resetToken, controls }: { frame: Fr
       camera.fov = 45
     }
     camera.near = 0.05
-    camera.far = 500
+    camera.far = 4000
     camera.updateProjectionMatrix()
     controls.current?.update()
     invalidate()
@@ -99,24 +104,63 @@ function CameraRig({ frame, eyeLevel, steep, resetToken, controls }: { frame: Fr
   return null
 }
 
-function RegisterCanvas({ id }: { id: string }) {
+/** What the photo renderer needs from a live 3D view. */
+export interface LiveView {
+  scene: THREE.Scene
+  camera: THREE.PerspectiveCamera
+  sun: SunState
+  size: { width: number; height: number }
+}
+
+const liveViews = new Map<string, () => LiveView>()
+
+export function getLiveView(id: string): LiveView | null {
+  return liveViews.get(id)?.() ?? null
+}
+
+function RegisterCanvas({ id, sun }: { id: string; sun: SunState }) {
   const gl = useThree((s) => s.gl)
+  const get = useThree((s) => s.get)
+  const sunRef = useRef(sun)
+  useEffect(() => {
+    sunRef.current = sun
+  }, [sun])
   useEffect(() => {
     canvases.set(id, gl.domElement)
+    const read = () => {
+      const st = get()
+      return { scene: st.scene, camera: st.camera as THREE.PerspectiveCamera, sun: sunRef.current, size: { width: st.size.width, height: st.size.height } }
+    }
+    liveViews.set(id, read)
     return () => {
       if (canvases.get(id) === gl.domElement) canvases.delete(id)
+      if (liveViews.get(id) === read) liveViews.delete(id)
     }
-  }, [gl, id])
+  }, [gl, id, get])
   return null
 }
 
 const PREF_KEY = 'home-designer-view-prefs'
 
-function loadPrefs(): { realistic: boolean } {
+interface ViewPrefs extends SunTime {
+  realistic: boolean
+}
+
+function loadPrefs(): ViewPrefs {
+  const now = new Date()
+  const base: ViewPrefs = { realistic: true, month: now.getMonth() + 1, day: now.getDate(), hour: 15 }
   try {
-    return { realistic: true, ...JSON.parse(localStorage.getItem(PREF_KEY) ?? '{}') }
+    return { ...base, ...JSON.parse(localStorage.getItem(PREF_KEY) ?? '{}') }
   } catch {
-    return { realistic: true }
+    return base
+  }
+}
+
+function savePrefs(patch: Partial<ViewPrefs>) {
+  try {
+    localStorage.setItem(PREF_KEY, JSON.stringify({ ...loadPrefs(), ...patch }))
+  } catch {
+    /* preference only */
   }
 }
 
@@ -129,11 +173,13 @@ export interface Viewer3DProps {
   selectedItemId?: string | null
   onSelectItem?: (id: string | null) => void
   compact?: boolean
+  /** Shows a "Photo" button that asks for a path-traced render of this view. */
+  onPhoto?: (viewId: string) => void
   /** Showing a single room: look down more steeply so its walls don't hide the inside. */
   singleRoom?: boolean
 }
 
-export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelectItem, compact, singleRoom }: Viewer3DProps) {
+export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelectItem, compact, singleRoom, onPhoto }: Viewer3DProps) {
   const [lowWalls, setLowWalls] = useState(!!singleRoom)
   // Open a single room with the walls cut down so nothing hides behind the near wall.
   const [wasSingle, setWasSingle] = useState(singleRoom)
@@ -141,7 +187,14 @@ export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelect
     setWasSingle(singleRoom)
     setLowWalls(!!singleRoom)
   }
-  const [evening, setEvening] = useState(false)
+  const [sunTime, setSunTime] = useState<SunTime>(() => {
+    const p = loadPrefs()
+    return { month: p.month, day: p.day, hour: p.hour }
+  })
+  const [sunOpen, setSunOpen] = useState(false)
+  const site = useMemo(() => design.site ?? defaultSite(), [design.site])
+  const sun = useMemo(() => computeSun(site, sunTime, dayOfYear(sunTime.month, sunTime.day)), [site, sunTime])
+  const evening = sun.night
   const [eyeLevel, setEyeLevel] = useState(false)
   const [realistic, setRealistic] = useState(() => (compact ? false : loadPrefs().realistic))
   const [resetToken, setResetToken] = useState(0)
@@ -159,17 +212,16 @@ export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelect
 
   const toggleRealistic = () => {
     setRealistic((v) => {
-      if (!compact)
-        try {
-          localStorage.setItem(PREF_KEY, JSON.stringify({ realistic: !v }))
-        } catch {
-          /* preference only */
-        }
+      if (!compact) savePrefs({ realistic: !v })
       return !v
     })
   }
+  const changeSunTime = (t: SunTime) => {
+    setSunTime(t)
+    if (!compact) savePrefs(t)
+  }
 
-  const sky = evening ? '#1b2130' : '#dfe6ec'
+  const horizon = horizonColor(sun)
   const walls = lowWalls && !eyeLevel
 
   return (
@@ -184,17 +236,18 @@ export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelect
         camera={{ fov: 45, position: [10, 10, 10] }}
         onPointerMissed={() => onSelectItem?.(null)}
       >
-        <color attach="background" args={[sky]} />
-        <fog attach="fog" args={[sky, framed.radius * 5, framed.radius * 12]} />
-        <hemisphereLight args={['#f4f7ff', '#a89f92', evening ? 0.06 : 0.55]} />
-        <SunLight center={framed.center} radius={framed.radius} intensity={evening ? 0.12 : 2.4} color={evening ? '#9db4ff' : '#fff4e0'} />
-        <LocalEnvironment intensity={evening ? 0.05 : 0.3} />
+        <color attach="background" args={[horizon]} />
+        <fog attach="fog" args={[horizon, framed.radius * 4 + 25, framed.radius * 9 + 70]} />
+        <SkyDome sun={sun} />
+        {/* With ceilings on, the sky can't reach in: stronger fill stands in for light bouncing around the room. */}
+        <hemisphereLight args={[evening ? '#3a4a70' : '#dfe9ff', '#8a8272', 0.08 + (eyeLevel ? 0.75 : 0.42) * sun.daylight]} />
+        {/* moonlight keeps night scenes readable */}
+        <SunLight center={framed.center} radius={framed.radius} dir={sun.altitude > -1 ? sun.dir : MOON} intensity={sun.altitude > -1 ? sun.intensity : 0.15} color={sun.altitude > -1 ? sun.color : '#9db4ff'} />
+        <LocalEnvironment intensity={0.05 + (eyeLevel ? 0.6 : 0.27) * sun.daylight} />
         {evening && <RoomLights design={design} />}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[framed.center.x, -0.01, framed.center.z]} receiveShadow>
-          <circleGeometry args={[framed.radius * 6, 64]} />
-          <meshStandardMaterial color={evening ? '#3a4038' : '#cfd6cc'} roughness={1} />
-        </mesh>
-        <HouseScene design={design} options={{ lowWalls: walls, evening, selectedItemId, onSelectItem }} />
+        <Ground center={framed.center} radius={framed.radius} night={sun.daylight < 0.3} />
+        {!compact && <Garden design={design} />}
+        <HouseScene design={design} options={{ lowWalls: walls, ceilings: eyeLevel, evening, selectedItemId, onSelectItem }} />
         <OrbitControls
           ref={controls}
           makeDefault
@@ -204,16 +257,19 @@ export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelect
             : { minDistance: 1, maxDistance: framed.radius * 6, maxPolarAngle: Math.PI / 2 - 0.05, minPolarAngle: 0, rotateSpeed: 1 })}
         />
         <CameraRig frame={framed} eyeLevel={eyeLevel} steep={singleRoom} resetToken={resetToken} controls={controls} />
-        <RegisterCanvas id={id} />
+        <RegisterCanvas id={id} sun={sun} />
         {realistic && (
           <EffectComposer multisampling={0}>
             <N8AO aoRadius={0.6} intensity={2.2} distanceFalloff={1} quality="medium" halfRes />
+            {/* lamps, lit ceiling fixtures and the sun disc glow softly */}
+            <Bloom mipmapBlur luminanceThreshold={1} luminanceSmoothing={0.2} intensity={0.45} />
             <SMAA />
-            <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+            <ToneMapping mode={ToneMappingMode.NEUTRAL} />
           </EffectComposer>
         )}
       </Canvas>
       {label && <div className="viewer-label">{label}</div>}
+      {sunOpen && !compact && <SunPanel site={site} time={sunTime} sun={sun} onTime={changeSunTime} onClose={() => setSunOpen(false)} />}
       {eyeLevel && <div className="viewer-hint">Drag to look around · right-drag (or two fingers) to walk</div>}
       <div className={'viewer-tools' + (compact ? ' compact' : '')}>
         <button className={eyeLevel ? 'active' : ''} onClick={() => setEyeLevel((v) => !v)} title="Stand inside the room at eye height">
@@ -224,9 +280,20 @@ export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelect
             Cutaway
           </button>
         )}
-        <button className={evening ? 'active' : ''} onClick={() => setEvening((v) => !v)} title="Switch between daylight and evening lighting">
-          {evening ? 'Evening' : 'Daylight'}
-        </button>
+        {compact ? (
+          <button className={evening ? 'active' : ''} onClick={() => changeSunTime({ ...sunTime, hour: evening ? 15 : 21 })} title="Switch between daylight and evening lighting">
+            {evening ? 'Evening' : 'Daylight'}
+          </button>
+        ) : (
+          <button className={sunOpen ? 'active' : ''} onClick={() => setSunOpen((v) => !v)} title="Sun position: location, date, time and which way the home faces">
+            {evening ? '☾' : '☀'} {formatHour(sunTime.hour)} · {sunTime.day} {MONTHS[sunTime.month - 1]}
+          </button>
+        )}
+        {onPhoto && (
+          <button className="photo-btn" onClick={() => onPhoto(id)} title="Render a photo-realistic image of this view (takes a little while)">
+            📷 Photo
+          </button>
+        )}
         <button className={realistic ? 'active' : ''} onClick={toggleRealistic} title="Ambient occlusion and film tone mapping (turn off on slow computers)">
           Realistic
         </button>

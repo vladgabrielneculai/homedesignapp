@@ -8,6 +8,8 @@ import { floorPatternUrl } from '../three/textures'
 import type { Product, StyleSettings, Tool } from '../types'
 import { PlanSymbol } from './PlanSymbol'
 import { ProductDialog } from './ProductDialog'
+import { UnderlayPanel } from './UnderlayPanel'
+import { ThumbnailStudio, useCatalogThumb } from '../three/ThumbnailStudio'
 
 type Tab = 'build' | 'furnish' | 'style'
 
@@ -58,6 +60,7 @@ function BuildPanel() {
       <label className="check">
         <input type="checkbox" checked={snapOn} onChange={(e) => setSnap(e.target.checked)} /> Snap to 10 cm grid
       </label>
+      <UnderlayPanel />
       <h3>Tips</h3>
       <ul className="tips">
         <li>
@@ -84,6 +87,15 @@ function CatalogThumb({ e, style }: { e: CatalogEntry; style: StyleSettings }) {
       <PlanSymbol e={e} color={itemColor({ id: '', catalogId: e.id, x: 0, y: 0, rotation: 0 }, e, style)} />
     </svg>
   )
+}
+
+/** Product photo, else the rendered 3D preview, else the plan symbol while the preview is being made. */
+function CardImage({ e, style }: { e: CatalogEntry; style: StyleSettings }) {
+  const photo = e.product?.photo
+  const render = useCatalogThumb(e, style, !photo)
+  if (photo) return <img src={photo} alt="" className="catalog-photo" />
+  if (render) return <img src={render} alt="" className="catalog-render" draggable={false} />
+  return <CatalogThumb e={e} style={style} />
 }
 
 function FurnishPanel() {
@@ -134,6 +146,7 @@ function FurnishPanel() {
         </div>
       )}
       <p className="muted small">Click an item and then click the plan to place it, or drag it onto the plan. Wall pieces snap to the nearest wall.</p>
+      <ThumbnailStudio />
       <div className="catalog-grid">
         {list.map((e) => (
           <div key={e.id} className="catalog-cell">
@@ -147,7 +160,7 @@ function FurnishPanel() {
               onClick={() => startPlacing(e.id)}
               title={`${e.name} — ${Math.round(e.w * 100)} × ${Math.round(e.d * 100)} × ${Math.round(e.h * 100)} cm`}
             >
-              {e.product?.photo ? <img src={e.product.photo} alt="" className="catalog-photo" /> : <CatalogThumb e={e} style={design.style} />}
+              <CardImage e={e} style={design.style} />
               <span className="catalog-name">{e.name}</span>
               <span className="catalog-dims">
                 {Math.round(e.w * 100)}×{Math.round(e.d * 100)} cm

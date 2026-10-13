@@ -4,7 +4,8 @@ import { TEMPLATES } from '../catalog/templates'
 import { uid } from '../lib/geometry'
 import { productCatalogId, syncProducts } from '../catalog/products'
 import { deleteBlob } from '../lib/blobStore'
-import type { Design, Product, Project, Room, Selection, Tool, Variant, ViewMode } from '../types'
+import { forgetWallpaper } from '../three/wallTextures'
+import type { Design, Product, Project, Room, Selection, Tool, Variant, ViewMode, Wallpaper } from '../types'
 
 const HISTORY_LIMIT = 80
 
@@ -17,6 +18,7 @@ interface State {
   // Persisted
   projects: Project[]
   products: Product[]
+  wallpapers: Wallpaper[]
   currentProjectId: string | null
   snap: boolean
 
@@ -43,6 +45,11 @@ interface State {
   saveProduct: (p: Product) => void
   deleteProduct: (id: string) => void
   importProducts: (list: Product[]) => void
+
+  // Uploaded wallpapers
+  saveWallpaper: (w: Wallpaper) => void
+  deleteWallpaper: (id: string) => void
+  importWallpapers: (list: Wallpaper[]) => void
 
   // Variants
   addVariant: (name: string, copyCurrent: boolean) => void
@@ -161,6 +168,7 @@ export const useStore = create<State>()(
     (set, get) => ({
       projects: [],
       products: [],
+      wallpapers: [],
       currentProjectId: null,
       snap: true,
 
@@ -253,6 +261,38 @@ export const useStore = create<State>()(
         set((s) => {
           const known = new Set(s.products.map((p) => p.id))
           return { products: [...list.filter((p) => !known.has(p.id)), ...s.products] }
+        }),
+
+      saveWallpaper: (w) =>
+        set((s) => ({ wallpapers: s.wallpapers.some((x) => x.id === w.id) ? s.wallpapers.map((x) => (x.id === w.id ? w : x)) : [w, ...s.wallpapers] })),
+
+      deleteWallpaper: (id) =>
+        set((s) => {
+          const wp = s.wallpapers.find((w) => w.id === id)
+          if (wp) {
+            deleteBlob(wp.key).catch(() => {})
+            forgetWallpaper(wp.key)
+          }
+          // Walls that used it go back to their default paint.
+          const strip = (d: Design): Design => ({
+            ...d,
+            walls: d.walls.map((w) => {
+              if (!w.sides) return w
+              const sides = { ...w.sides }
+              for (const k of ['a', 'b'] as const) if (sides[k]?.kind === 'image' && sides[k].id === id) delete sides[k]
+              return { ...w, sides }
+            }),
+          })
+          return {
+            wallpapers: s.wallpapers.filter((w) => w.id !== id),
+            projects: s.projects.map((p) => ({ ...p, variants: p.variants.map((v) => ({ ...v, design: strip(v.design) })) })),
+          }
+        }),
+
+      importWallpapers: (list) =>
+        set((s) => {
+          const known = new Set(s.wallpapers.map((w) => w.id))
+          return { wallpapers: [...list.filter((w) => !known.has(w.id)), ...s.wallpapers] }
         }),
 
       addVariant: (name, copyCurrent) =>
@@ -355,7 +395,7 @@ export const useStore = create<State>()(
     {
       name: 'home-designer-v1',
       storage: createJSONStorage(() => safeStorage),
-      partialize: (s) => ({ projects: s.projects, products: s.products, currentProjectId: s.currentProjectId, snap: s.snap }),
+      partialize: (s) => ({ projects: s.projects, products: s.products, wallpapers: s.wallpapers, currentProjectId: s.currentProjectId, snap: s.snap }),
     },
   ),
 )

@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { getEntry } from '../catalog/catalog'
+import { itemEntry } from '../catalog/catalog'
 import { TEMPLATES } from '../catalog/templates'
 import { getFloor } from '../catalog/styles'
 import { itemColor } from '../lib/colors'
@@ -30,7 +30,7 @@ export function MiniPlan({ design }: { design: Design }) {
         <polygon key={r.id} points={r.points.map((p) => `${p.x},${p.y}`).join(' ')} fill={getFloor(r.floor ?? design.style.floor).base} opacity={0.45} />
       ))}
       {design.items.map((it) => {
-        const e = getEntry(it.catalogId)
+        const e = itemEntry(it)
         return (
           <g key={it.id} transform={`translate(${it.x} ${it.y}) rotate(${it.rotation})`}>
             <PlanSymbol e={e} color={itemColor(it, e, design.style)} stroke="#6b7177" />

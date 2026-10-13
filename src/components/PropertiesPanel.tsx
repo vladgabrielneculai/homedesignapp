@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { getEntry } from '../catalog/catalog'
+import { getEntry, itemEntry, MAX_SIZE, MIN_SIZE } from '../catalog/catalog'
 import { formatPrice, productCatalogId } from '../catalog/products'
 import { FLOORS, PAINT_SWATCHES } from '../catalog/styles'
 import { roleColor } from '../lib/colors'
 import { clampOpening, pointInPolygon, polygonArea, uid, wallAngle, wallLength } from '../lib/geometry'
-import { wallInRoom } from '../lib/roomFocus'
+import { roomSides, roomsBeside } from '../lib/roomFocus'
+import { withSideFinish, sameFinish } from '../catalog/wallFinishes'
+import { FinishPicker } from './FinishPicker'
 import { useDesign, useFocusRoom, useStore } from '../state/store'
 import { floorPatternUrl } from '../three/textures'
-import type { Design, FloorId } from '../types'
+import type { Design, FloorId, Room, WallFinish, WallSide } from '../types'
 import { ProductDialog } from './ProductDialog'
 
 function NumberField({ label, value, step = 0.01, min, max, unit = 'm', onChange }: { label: string; value: number; step?: number; min?: number; max?: number; unit?: string; onChange: (v: number) => void }) {
@@ -150,7 +152,13 @@ function ItemProps({ id, design }: { id: string; design: Design }) {
   const [editingProduct, setEditingProduct] = useState(false)
   if (!item) return null
   const product = products.find((p) => productCatalogId(p) === item.catalogId)
-  const entry = getEntry(item.catalogId)
+  const base = getEntry(item.catalogId)
+  const entry = itemEntry(item)
+  const resized = item.w !== undefined || item.d !== undefined || item.h !== undefined
+  const setSize = (key: 'w' | 'd' | 'h', cm: number) => {
+    const v = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(cm) / 100))
+    set({ [key]: Math.abs(v - base[key]) < 0.005 ? undefined : v })
+  }
   const set = (patch: Partial<typeof item>, record = true) => updateDesign((d) => ({ ...d, items: d.items.map((i) => (i.id === id ? { ...i, ...patch } : i)) }), { record })
   const color = item.color ?? roleColor(entry, design.style)
   const colorable = entry.colorRole !== 'fixed'
@@ -158,8 +166,19 @@ function ItemProps({ id, design }: { id: string; design: Design }) {
     <div className="panel">
       <h3>{entry.name}</h3>
       <p className="muted small">
-        {entry.category} · {Math.round(entry.w * 100)} × {Math.round(entry.d * 100)} × {Math.round(entry.h * 100)} cm
+        {entry.category}
+        {resized && ` · catalog size ${Math.round(base.w * 100)} × ${Math.round(base.d * 100)} × ${Math.round(base.h * 100)} cm`}
       </p>
+      <div className="field-row three">
+        <NumberField label="W" value={entry.w * 100} step={1} min={MIN_SIZE * 100} max={MAX_SIZE * 100} unit="cm" onChange={(v) => setSize('w', v)} />
+        <NumberField label="D" value={entry.d * 100} step={1} min={MIN_SIZE * 100} max={MAX_SIZE * 100} unit="cm" onChange={(v) => setSize('d', v)} />
+        <NumberField label="H" value={entry.h * 100} step={1} min={MIN_SIZE * 100} max={MAX_SIZE * 100} unit="cm" onChange={(v) => setSize('h', v)} />
+      </div>
+      {resized && (
+        <button className="btn small" onClick={() => set({ w: undefined, d: undefined, h: undefined })}>
+          Reset to catalog size
+        </button>
+      )}
       <div className="field-row">
         <NumberField label="X" value={item.x} step={0.05} onChange={(x) => set({ x })} />
         <NumberField label="Y" value={item.y} step={0.05} onChange={(y) => set({ y })} />
@@ -250,6 +269,13 @@ function ItemProps({ id, design }: { id: string; design: Design }) {
   )
 }
 
+/** Names a wall face by the room it looks into. */
+function sideLabel(room: Room | undefined, other: Room | undefined, side: WallSide): string {
+  if (room) return `${room.name || 'Room'} side`
+  if (other) return 'Outside / other side'
+  return side === 'a' ? 'Side 1' : 'Side 2'
+}
+
 function WallProps({ id, design }: { id: string; design: Design }) {
   const wall = design.walls.find((w) => w.id === id)
   const { updateDesign } = useStore.getState()
@@ -266,29 +292,23 @@ function WallProps({ id, design }: { id: string; design: Design }) {
   }
   const set = (patch: Partial<typeof wall>) => updateDesign((d) => ({ ...d, walls: d.walls.map((w) => (w.id === id ? { ...w, ...patch } : w)) }))
   const count = design.openings.filter((o) => o.wallId === id).length
+  const beside = roomsBeside(wall, design.rooms)
   return (
     <div className="panel">
       <h3>Wall</h3>
       <NumberField label="Length" value={len} step={0.05} min={0.2} onChange={setLength} />
       <NumberField label="Thickness" value={wall.thickness} step={0.01} min={0.05} max={0.6} onChange={(thickness) => set({ thickness })} />
       <NumberField label="Height" value={wall.height} step={0.05} min={1} max={6} onChange={(height) => set({ height })} />
-      <h4>Paint (this wall)</h4>
-      <div className="swatches">
-        {PAINT_SWATCHES.map((c) => (
-          <button key={c} className={'swatch' + (wall.color === c ? ' active' : '')} style={{ background: c }} onClick={() => set({ color: c })} aria-label={`Wall color ${c}`} />
-        ))}
-      </div>
-      <div className="btn-row">
-        <label className="color-field compact">
-          <input type="color" value={wall.color ?? design.style.wallColor} onChange={(e) => set({ color: e.target.value })} />
-          <span>Accent wall color</span>
-        </label>
-        {wall.color && (
-          <button className="btn small" onClick={() => set({ color: undefined })}>
-            Use style paint
-          </button>
-        )}
-      </div>
+      {(['a', 'b'] as const).map((side) => (
+        <div key={side} className="side-block">
+          <h4>{sideLabel(beside[side], beside[side === 'a' ? 'b' : 'a'], side)}</h4>
+          <FinishPicker
+            value={wall.sides?.[side] ?? (wall.color ? { kind: 'paint', color: wall.color } : undefined)}
+            style={design.style}
+            onChange={(f) => updateDesign((d) => ({ ...d, walls: d.walls.map((w) => (w.id === id ? withSideFinish(w, side, f) : w)) }))}
+          />
+        </div>
+      ))}
       <p className="muted small">
         {count} {count === 1 ? 'opening' : 'openings'} on this wall. Drag the blue handles on the plan to move its corners.
       </p>
@@ -334,12 +354,19 @@ function RoomProps({ id, design }: { id: string; design: Design }) {
   if (!room) return null
   const set = (patch: Partial<typeof room>) => updateDesign((d) => ({ ...d, rooms: d.rooms.map((r) => (r.id === id ? { ...r, ...patch } : r)) }))
   const active: FloorId | undefined = room.floor
-  const roomWalls = design.walls.filter((w) => wallInRoom(w, room.points))
-  const paint = roomWalls.length && roomWalls.every((w) => w.color === roomWalls[0].color) ? roomWalls[0].color : undefined
-  const setPaint = (color: string | undefined) => {
-    const ids = new Set(roomWalls.map((w) => w.id))
-    updateDesign((d) => ({ ...d, walls: d.walls.map((w) => (ids.has(w.id) ? { ...w, color } : w)) }))
-  }
+  // Only the faces that look into this room change, so neighbouring rooms keep their own walls.
+  const faces = new Map(design.walls.map((w) => [w.id, roomSides(w, room.points)] as const).filter(([, sides]) => sides.length))
+  const current = [...faces].flatMap(([wid, sides]) => {
+    const w = design.walls.find((x) => x.id === wid)!
+    return sides.map((side) => w.sides?.[side] ?? (w.color ? ({ kind: 'paint', color: w.color } as WallFinish) : undefined))
+  })
+  const finish = current.every((f) => sameFinish(f, current[0])) ? current[0] : undefined
+  const mixed = current.some((f) => !sameFinish(f, current[0]))
+  const setFinish = (f: WallFinish | undefined) =>
+    updateDesign((d) => ({
+      ...d,
+      walls: d.walls.map((w) => (faces.get(w.id) ?? []).reduce((acc, side) => withSideFinish(acc, side, f), w)),
+    }))
   const items = design.items.filter((it) => pointInPolygon(it, room.points)).length
   return (
     <div className="panel">
@@ -373,31 +400,17 @@ function RoomProps({ id, design }: { id: string; design: Design }) {
           </button>
         ))}
       </div>
-      {!!roomWalls.length && (
+      {faces.size > 0 && (
         <>
-          <h4>Wall paint (this room)</h4>
-          <div className="swatches">
-            {PAINT_SWATCHES.map((c) => (
-              <button key={c} className={'swatch' + (paint === c ? ' active' : '')} style={{ background: c }} onClick={() => setPaint(c)} aria-label={`Paint room walls ${c}`} />
-            ))}
-          </div>
-          <div className="btn-row">
-            <label className="color-field compact">
-              <input type="color" value={paint ?? design.style.wallColor} onChange={(e) => setPaint(e.target.value)} />
-              <span>Custom color</span>
-            </label>
-            {roomWalls.some((w) => w.color) && (
-              <button className="btn small" onClick={() => setPaint(undefined)}>
-                Use style paint
-              </button>
-            )}
-          </div>
-          <p className="muted small">Walls shared with a neighbouring room change color on both sides.</p>
+          <h4>Walls (inside this room)</h4>
+          {mixed && <p className="muted small">The walls have different finishes; picking one applies it to all of them.</p>}
+          <FinishPicker value={finish} mixed={mixed} style={design.style} onChange={setFinish} />
+          <p className="muted small">Only the side facing into this room changes. Click a single wall on the plan for an accent wall.</p>
         </>
       )}
       {focused && (
         <p className="muted small">
-          Furniture you place inside this room stays with it. To change one wall only, click it on the plan.
+          Furniture you place inside this room stays with it.
         </p>
       )}
       <button

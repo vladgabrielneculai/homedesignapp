@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
-import type { CatalogEntry, UserModelRef } from '../catalog/catalog'
+import { getEntry, type CatalogEntry, type UserModelRef } from '../catalog/catalog'
 import { getBlob } from '../lib/blobStore'
 
 const cache = new Map<string, Promise<THREE.Object3D>>()
@@ -83,10 +83,14 @@ export function fitObject(source: THREE.Object3D, entry: CatalogEntry, opts: { h
 
   const box = new THREE.Box3().setFromObject(holder)
   const size = box.getSize(new THREE.Vector3())
-  const s = Math.min(entry.w / (size.x || 1), entry.d / (size.z || 1), entry.h / (size.y || 1))
+  // Fit the catalog size without distorting the model, then stretch it if the item was resized.
+  const found = getEntry(entry.id)
+  const base = found.id === entry.id ? found : entry
+  const s = Math.min(base.w / (size.x || 1), base.d / (size.z || 1), base.h / (size.y || 1))
+  const k = new THREE.Vector3(s * (entry.w / base.w), s * (entry.h / base.h), s * (entry.d / base.d))
   const center = box.getCenter(new THREE.Vector3())
-  holder.scale.setScalar(s)
-  holder.position.set(-center.x * s, -box.min.y * s, -center.z * s)
+  holder.scale.copy(k)
+  holder.position.set(-center.x * k.x, -box.min.y * k.y, -center.z * k.z)
   const wrapper = new THREE.Group()
   wrapper.add(holder)
   return wrapper

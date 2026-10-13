@@ -39,8 +39,9 @@ export function ProjectsPage() {
               if (!f) return
               try {
                 setError(null)
-                const { project, products } = await readProjectFile(f)
+                const { project, products, wallpapers } = await readProjectFile(f)
                 useStore.getState().importProducts(products)
+                useStore.getState().importWallpapers(wallpapers)
                 const id = importProject(project)
                 openProject(id)
               } catch (err) {
@@ -113,7 +114,7 @@ export function ProjectsPage() {
                 <button className="btn small" onClick={() => duplicateProject(p.id)}>
                   Duplicate
                 </button>
-                <button className="btn small" onClick={() => exportProjectJson(p, useStore.getState().products)}>
+                <button className="btn small" onClick={() => exportProjectJson(p, useStore.getState())}>
                   Export
                 </button>
                 <button

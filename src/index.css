@@ -824,6 +824,20 @@ a {
   grid-template-columns: 14px 1fr 14px;
 }
 
+.field-row.three {
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.field-row.three .num-field {
+  grid-template-columns: 12px 1fr 18px;
+  gap: 3px;
+}
+
+.field-row.three .num-field input {
+  padding: 6px 4px;
+}
+
 .range-field {
   display: grid;
   grid-template-columns: 62px 1fr 36px;
@@ -928,7 +942,8 @@ a {
 .editor2d.tool-room svg,
 .editor2d.tool-door svg,
 .editor2d.tool-window svg,
-.editor2d.tool-place svg {
+.editor2d.tool-place svg,
+.editor2d.tool-calibrate svg {
   cursor: crosshair;
 }
 
@@ -1638,4 +1653,317 @@ label.btn {
   border-color: var(--brand);
   color: var(--brand);
   font-weight: 600;
+}
+
+/* ---------- Wall finishes ---------- */
+.finish-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.segmented.full {
+  display: flex;
+  width: 100%;
+}
+
+.segmented.full button {
+  flex: 1;
+}
+
+.segmented.small button {
+  padding: 5px 4px;
+  font-size: 12px;
+}
+
+.finish-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.finish-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.2;
+  color: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+
+.finish-card.active {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 30%, transparent);
+}
+
+.finish-card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 5px;
+  display: block;
+}
+
+.finish-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.finish-edit {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.side-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- Sun panel and compass ---------- */
+.sun-panel {
+  position: absolute;
+  right: 12px;
+  top: 52px;
+  width: 300px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 64px);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(20, 24, 28, 0.18);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 5;
+  font-size: 13px;
+}
+
+.sun-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sun-date {
+  display: grid;
+  grid-template-columns: 62px 64px 1fr 22px;
+  align-items: center;
+  gap: 8px;
+}
+
+.sun-date em {
+  font-style: normal;
+  color: var(--muted);
+  text-align: right;
+}
+
+.sun-north {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sun-north .range-field {
+  flex: 1;
+  grid-template-columns: 62px 1fr 52px;
+}
+
+.plan-compass {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  pointer-events: auto;
+}
+
+/* ---------- Photo render ---------- */
+.modal.photo-modal {
+  width: min(1100px, calc(100vw - 32px));
+}
+
+.photo-stage {
+  background: #111418;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.photo-stage canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 62vh;
+  object-fit: contain;
+}
+
+.photo-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.photo-progress .bar {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.photo-progress .bar > div {
+  height: 100%;
+  background: var(--brand);
+  transition: width 0.3s;
+}
+
+.photo-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.viewer-tools button.photo-btn {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.photo-placeholder {
+  color: #9aa1a8;
+  font-size: 13px;
+}
+
+/* ---------- Rendered catalog previews ---------- */
+.thumb-studio {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 224px;
+  height: 224px;
+  pointer-events: none;
+}
+
+.catalog-render {
+  width: 92px;
+  height: 92px;
+  object-fit: contain;
+  margin: -10px 0 -6px;
+}
+
+/* ---------- Imported floor plan ---------- */
+.editor2d.tool-moveUnderlay svg {
+  cursor: move;
+}
+
+.underlay-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.underlay-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.underlay-head img,
+.underlay-thumb {
+  width: 54px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  flex: none;
+}
+
+.underlay-head > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.underlay-head strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.banner.warn {
+  background: #fff4e5;
+  border-color: #f3c78a;
+  color: #8a5300;
+}
+
+.btn.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.calib-form {
+  position: absolute;
+  left: 50%;
+  bottom: 56px;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(20, 24, 28, 0.18);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(320px, calc(100% - 24px));
+  font-size: 13px;
+}
+
+.calib-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calib-form .input-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calib-form em {
+  font-style: normal;
+  color: var(--muted);
 }
