@@ -91,6 +91,15 @@ function photoScene(view: LiveView): THREE.Scene {
     // Ceilings are one-sided (invisible from above in the live view); the path tracer would let
     // sunlight straight through them, so make them solid from both sides.
     const mesh = o as THREE.Mesh
+    // Small glowing surfaces (lamp shades) are only hit by chance and leave bright speckles that take
+    // ages to clear. By day the lamps are off; at night their point lights do the lighting, so a
+    // gentler glow is enough.
+    const std = mesh.material as THREE.MeshStandardMaterial
+    if (mesh.isMesh && !Array.isArray(mesh.material) && std.emissive && std.emissiveIntensity > 0 && std.emissive.getHex() !== 0) {
+      const m = std.clone()
+      m.emissiveIntensity = view.sun.night ? Math.min(m.emissiveIntensity, 0.8) : 0
+      mesh.material = m
+    }
     if (o.userData.isCeiling && mesh.isMesh) {
       const m = (mesh.material as THREE.Material).clone()
       m.side = THREE.DoubleSide
