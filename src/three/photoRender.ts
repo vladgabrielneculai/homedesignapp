@@ -86,6 +86,8 @@ function photoScene(view: LiveView): THREE.Scene {
   scene.traverse((o) => {
     if ((o as THREE.Mesh).isMesh && Array.isArray((o as THREE.Mesh).material)) multi.push(o as THREE.Mesh)
     if (o.userData.isSkyDome || (o as THREE.LineSegments).isLineSegments || !o.visible) drop.push(o)
+    // By day the lamps are off: their small lights only add speckles via glossy bounces.
+    if ((o as THREE.PointLight).isPointLight && !view.sun.night) drop.push(o)
     const light = o as THREE.DirectionalLight
     if (light.isDirectionalLight) light.target.updateMatrixWorld(true)
     // Ceilings are one-sided (invisible from above in the live view); the path tracer would let
