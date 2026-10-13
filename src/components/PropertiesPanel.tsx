@@ -3,8 +3,9 @@ import { getEntry } from '../catalog/catalog'
 import { formatPrice, productCatalogId } from '../catalog/products'
 import { FLOORS, PAINT_SWATCHES } from '../catalog/styles'
 import { roleColor } from '../lib/colors'
-import { clampOpening, polygonArea, uid, wallAngle, wallLength } from '../lib/geometry'
-import { useDesign, useStore } from '../state/store'
+import { clampOpening, pointInPolygon, polygonArea, uid, wallAngle, wallLength } from '../lib/geometry'
+import { wallInRoom } from '../lib/roomFocus'
+import { useDesign, useFocusRoom, useStore } from '../state/store'
 import { floorPatternUrl } from '../three/textures'
 import type { Design, FloorId } from '../types'
 import { ProductDialog } from './ProductDialog'
@@ -76,10 +77,11 @@ export function nudgeSelectedItem(dx: number, dy: number) {
 export function PropertiesPanel() {
   const design = useDesign()
   const selection = useStore((s) => s.selection)
+  const focus = useFocusRoom()
   if (!design) return null
   return (
     <aside className="properties">
-      {!selection && <Summary design={design} />}
+      {!selection && (focus ? <RoomProps id={focus.id} design={design} /> : <Summary design={design} />)}
       {selection?.kind === 'item' && <ItemProps id={selection.id} design={design} />}
       {selection?.kind === 'wall' && <WallProps id={selection.id} design={design} />}
       {selection?.kind === 'opening' && <OpeningProps id={selection.id} design={design} />}
@@ -128,6 +130,9 @@ function Summary({ design }: { design: Design }) {
                   {r.name}
                 </button>
                 <span>{polygonArea(r.points).toFixed(1)} m²</span>
+                <button className="btn small" onClick={() => useStore.getState().focusRoom(r.id)} title={`Show only ${r.name} in the plan and 3D view`}>
+                  Edit alone
+                </button>
               </li>
             ))}
           </ul>
@@ -324,18 +329,37 @@ function OpeningProps({ id, design }: { id: string; design: Design }) {
 
 function RoomProps({ id, design }: { id: string; design: Design }) {
   const room = design.rooms.find((r) => r.id === id)
-  const { updateDesign } = useStore.getState()
+  const focused = useStore((s) => s.focusRoomId === id)
+  const { updateDesign, focusRoom } = useStore.getState()
   if (!room) return null
   const set = (patch: Partial<typeof room>) => updateDesign((d) => ({ ...d, rooms: d.rooms.map((r) => (r.id === id ? { ...r, ...patch } : r)) }))
   const active: FloorId | undefined = room.floor
+  const roomWalls = design.walls.filter((w) => wallInRoom(w, room.points))
+  const paint = roomWalls.length && roomWalls.every((w) => w.color === roomWalls[0].color) ? roomWalls[0].color : undefined
+  const setPaint = (color: string | undefined) => {
+    const ids = new Set(roomWalls.map((w) => w.id))
+    updateDesign((d) => ({ ...d, walls: d.walls.map((w) => (ids.has(w.id) ? { ...w, color } : w)) }))
+  }
+  const items = design.items.filter((it) => pointInPolygon(it, room.points)).length
   return (
     <div className="panel">
       <h3>Room</h3>
+      {focused ? (
+        <button className="btn full" onClick={() => focusRoom(null)}>
+          ← Show the whole home
+        </button>
+      ) : (
+        <button className="btn primary full" onClick={() => focusRoom(id)} title="Hide the rest of the home in the plan and 3D view">
+          Edit this room alone
+        </button>
+      )}
       <label className="text-field">
         <span>Name</span>
         <input className="input" value={room.name} onChange={(e) => updateDesign((d) => ({ ...d, rooms: d.rooms.map((r) => (r.id === id ? { ...r, name: e.target.value } : r)) }), { record: false })} />
       </label>
-      <p className="muted small">Area {polygonArea(room.points).toFixed(1)} m²</p>
+      <p className="muted small">
+        Area {polygonArea(room.points).toFixed(1)} m² · {items} {items === 1 ? 'item' : 'items'}
+      </p>
       <h4>Flooring</h4>
       <div className="floor-grid">
         <button className={'floor-card' + (!active ? ' active' : '')} onClick={() => set({ floor: undefined })}>
@@ -349,7 +373,40 @@ function RoomProps({ id, design }: { id: string; design: Design }) {
           </button>
         ))}
       </div>
-      <button className="btn danger full" onClick={deleteSelection}>
+      {!!roomWalls.length && (
+        <>
+          <h4>Wall paint (this room)</h4>
+          <div className="swatches">
+            {PAINT_SWATCHES.map((c) => (
+              <button key={c} className={'swatch' + (paint === c ? ' active' : '')} style={{ background: c }} onClick={() => setPaint(c)} aria-label={`Paint room walls ${c}`} />
+            ))}
+          </div>
+          <div className="btn-row">
+            <label className="color-field compact">
+              <input type="color" value={paint ?? design.style.wallColor} onChange={(e) => setPaint(e.target.value)} />
+              <span>Custom color</span>
+            </label>
+            {roomWalls.some((w) => w.color) && (
+              <button className="btn small" onClick={() => setPaint(undefined)}>
+                Use style paint
+              </button>
+            )}
+          </div>
+          <p className="muted small">Walls shared with a neighbouring room change color on both sides.</p>
+        </>
+      )}
+      {focused && (
+        <p className="muted small">
+          Furniture you place inside this room stays with it. To change one wall only, click it on the plan.
+        </p>
+      )}
+      <button
+        className="btn danger full"
+        onClick={() => {
+          useStore.getState().select({ kind: 'room', id })
+          deleteSelection()
+        }}
+      >
         Remove room floor
       </button>
       <p className="muted small">Removing the room keeps its walls.</p>

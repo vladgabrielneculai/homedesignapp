@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { STYLE_PRESETS } from '../catalog/styles'
 import { download, exportProjectJson, safeName, svgToPng } from '../lib/export'
-import { activeVariant, useProject, useStore } from '../state/store'
+import { roomDesign } from '../lib/roomFocus'
+import { activeVariant, useFocusRoom, useProject, useStore } from '../state/store'
 import { capture3D, Viewer3D } from '../three/Viewer3D'
 import type { ViewMode } from '../types'
 import { Editor2D, planSvgs } from './Editor2D'
@@ -18,7 +19,8 @@ const VIEW_MODES: { id: ViewMode; label: string }[] = [
 ]
 
 function saveThumbnail() {
-  const { currentProjectId, setThumbnail } = useStore.getState()
+  const { currentProjectId, setThumbnail, focusRoomId } = useStore.getState()
+  if (focusRoomId) return // the thumbnail shows the whole home
   const shot = capture3D('main', 480)
   if (currentProjectId && shot) setThumbnail(currentProjectId, shot)
 }
@@ -78,7 +80,8 @@ export function EditorPage() {
   const selection = useStore((s) => s.selection)
   const canUndo = useStore((s) => s.history.past.length > 0)
   const canRedo = useStore((s) => s.history.future.length > 0)
-  const { openProject, renameProject, setViewMode, undo, redo, select } = useStore.getState()
+  const focus = useFocusRoom()
+  const { openProject, renameProject, setViewMode, undo, redo, select, focusRoom } = useStore.getState()
   const [menuOpen, setMenuOpen] = useState(false)
   const [shopping, setShopping] = useState(false)
   useShortcuts()
@@ -91,19 +94,24 @@ export function EditorPage() {
     return () => clearTimeout(t)
   }, [updatedAt, viewMode])
 
-  if (!project) return null
-  const variant = activeVariant(project)!
-  const frameKey = `${project.id}:${variant.id}`
+  const variant = project && activeVariant(project)
+  const design = variant?.design
+  // In room focus the 3D view and shopping list only see that room.
+  const shown = useMemo(() => (design && focus ? roomDesign(design, focus) : design), [design, focus])
+
+  if (!project || !variant || !shown) return null
+  const frameKey = `${project.id}:${variant.id}:${focus?.id ?? ''}`
+  const viewName = focus ? `${variant.name}-${focus.name}` : variant.name
 
   const exportPlan = async () => {
     const svg = planSvgs.get('main')
     if (!svg) return alert('Switch to the 2D plan or split view to export the floor plan.')
-    download(`${safeName(project.name)}-${safeName(variant.name)}-plan.png`, await svgToPng(svg))
+    download(`${safeName(project.name)}-${safeName(viewName)}-plan.png`, await svgToPng(svg))
   }
   const export3D = () => {
     const shot = capture3D('main')
     if (!shot) return alert('Switch to the 3D or split view to export a 3D image.')
-    download(`${safeName(project.name)}-${safeName(variant.name)}-3d.png`, shot)
+    download(`${safeName(project.name)}-${safeName(viewName)}-3d.png`, shot)
   }
 
   return (
@@ -128,6 +136,19 @@ export function EditorPage() {
             ↷
           </button>
         </div>
+        {variant.design.rooms.length > 0 && (
+          <label className={'room-picker' + (focus ? ' active' : '')} title="Show and edit one room at a time">
+            <span>Room</span>
+            <select className="input small" value={focus?.id ?? ''} onChange={(e) => focusRoom(e.target.value || null)}>
+              <option value="">Whole home</option>
+              {variant.design.rooms.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name || 'Unnamed room'}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="segmented view-modes" role="tablist" aria-label="View">
           {VIEW_MODES.map((m) => (
             <button key={m.id} role="tab" aria-selected={viewMode === m.id} className={viewMode === m.id ? 'active' : ''} onClick={() => setViewMode(m.id)} disabled={m.id === 'compare' && project.variants.length < 2} title={m.id === 'compare' && project.variants.length < 2 ? 'Create a second variant to compare' : undefined}>
@@ -158,34 +179,48 @@ export function EditorPage() {
 
       <div className={'workspace' + (viewMode === 'compare' ? ' compare-mode' : '')}>
         {viewMode !== 'compare' && <Sidebar />}
-        <main className={`stage stage-${viewMode}`}>
-          {viewMode === 'compare' ? (
-            <CompareView />
-          ) : (
-            <>
-              {viewMode !== '3d' && (
-                <section className="pane pane-2d">
-                  <Editor2D />
-                </section>
-              )}
-              {viewMode !== '2d' && (
-                <section className="pane pane-3d">
-                  <Viewer3D
-                    id="main"
-                    design={variant.design}
-                    frameKey={frameKey}
-                    selectedItemId={selection?.kind === 'item' ? selection.id : null}
-                    onSelectItem={(id) => select(id ? { kind: 'item', id } : null)}
-                  />
-                </section>
-              )}
-            </>
+        <div className="stage-col">
+          {focus && viewMode !== 'compare' && (
+            <div className="focus-banner" role="status">
+              <span>
+                Editing <strong>{focus.name || 'this room'}</strong> on its own. The rest of the home is hidden.
+              </span>
+              <span className="spacer" />
+              <button className="btn small" onClick={() => focusRoom(null)}>
+                Show whole home
+              </button>
+            </div>
           )}
-        </main>
+          <main className={`stage stage-${viewMode}`}>
+            {viewMode === 'compare' ? (
+              <CompareView />
+            ) : (
+              <>
+                {viewMode !== '3d' && (
+                  <section className="pane pane-2d">
+                    <Editor2D />
+                  </section>
+                )}
+                {viewMode !== '2d' && (
+                  <section className="pane pane-3d">
+                    <Viewer3D
+                      id="main"
+                      design={shown}
+                      singleRoom={!!focus}
+                      frameKey={frameKey}
+                      selectedItemId={selection?.kind === 'item' ? selection.id : null}
+                      onSelectItem={(id) => select(id ? { kind: 'item', id } : null)}
+                    />
+                  </section>
+                )}
+              </>
+            )}
+          </main>
+        </div>
         {viewMode !== 'compare' && <PropertiesPanel />}
       </div>
       <VariantsBar />
-      {shopping && <ShoppingList design={variant.design} title={`${project.name} – ${variant.name}`} onClose={() => setShopping(false)} />}
+      {shopping && <ShoppingList design={shown} title={`${project.name} – ${variant.name}${focus ? ` – ${focus.name}` : ''}`} onClose={() => setShopping(false)} />}
     </div>
   )
 }

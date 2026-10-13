@@ -9,6 +9,7 @@ import {
   dist,
   inFootprint,
   nearestWall,
+  pointInPolygon,
   orthoAssist,
   polygonArea,
   polygonCentroid,
@@ -19,9 +20,10 @@ import {
   wallAngle,
   wallLength,
 } from '../lib/geometry'
-import { useDesign, useProject, useStore } from '../state/store'
+import { itemInRoom, wallSpan } from '../lib/roomFocus'
+import { useDesign, useFocusRoom, useProject, useStore } from '../state/store'
 import { floorPatternUrl } from '../three/textures'
-import type { Design, Opening, Pt, Wall } from '../types'
+import type { Design, Opening, Pt, Room, Wall } from '../types'
 import { PlanSymbol } from './PlanSymbol'
 
 const GRID = 0.1
@@ -89,8 +91,8 @@ function elevationAt(design: Design, p: Pt, catalogId: string, ignoreId?: string
   return h || undefined
 }
 
-function fitView(design: Design, w: number, h: number): View {
-  const pts = [...design.walls.flatMap((x) => [x.a, x.b]), ...design.items.map((i) => ({ x: i.x, y: i.y }))]
+function fitView(design: Design, w: number, h: number, room?: Room): View {
+  const pts = room ? room.points : [...design.walls.flatMap((x) => [x.a, x.b]), ...design.items.map((i) => ({ x: i.x, y: i.y }))]
   if (!pts.length) return { cx: 5, cy: 4, scale: 60 }
   const b = bounds(pts)
   const pad = 1.2
@@ -98,11 +100,45 @@ function fitView(design: Design, w: number, h: number): View {
   return { cx: (b.minX + b.maxX) / 2, cy: (b.minY + b.maxY) / 2, scale: Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale)) }
 }
 
+/**
+ * What the plan draws: everything, or only one room's floor, walls, openings and furniture.
+ * The selected wall or item stays visible so dragging it out of the room doesn't make it vanish.
+ */
+function visiblePart(design: Design, room: Room | undefined, selectedId: string | undefined): { design: Design; spans: Map<string, [number, number]> } {
+  const spans = new Map<string, [number, number]>()
+  if (!room) return { design, spans }
+  // Walls keep their real ends (so editing works as usual); only the stretch around the room is drawn.
+  const walls = design.walls.filter((w) => {
+    const span = wallSpan(w, room.points) ?? (w.id === selectedId ? [0, wallLength(w)] : null)
+    if (span) spans.set(w.id, span)
+    return !!span
+  })
+  return {
+    spans,
+    design: {
+      ...design,
+      walls,
+      openings: design.openings.filter((o) => {
+        const span = spans.get(o.wallId)
+        return o.id === selectedId || (!!span && o.offset + o.width / 2 > span[0] && o.offset - o.width / 2 < span[1])
+      }),
+      rooms: [room],
+      items: design.items.filter((it) => it.id === selectedId || itemInRoom(it, room.points)),
+    },
+  }
+}
+
 export function Editor2D() {
-  const design = useDesign()
+  const fullDesign = useDesign()
+  const focus = useFocusRoom()
   const project = useProject()
   const { tool, selection, placeCatalogId, snap: snapOn } = useStore()
-  const { updateDesign, checkpoint, select, setTool } = useStore.getState()
+  const { updateDesign, checkpoint, select, setTool, focusRoom } = useStore.getState()
+  const visible = useMemo(
+    () => fullDesign && visiblePart(fullDesign, focus, selection && selection.kind !== 'room' ? selection.id : undefined),
+    [fullDesign, focus, selection],
+  )
+  const design = visible?.design
 
   const svgRef = useRef<SVGSVGElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -123,15 +159,15 @@ export function Editor2D() {
     return () => ro.disconnect()
   }, [])
 
-  // Fit the plan when a project or variant is opened.
-  const frameKey = `${project?.id}:${project?.activeVariantId}`
+  // Fit the plan when a project, variant or focused room is opened.
+  const frameKey = `${project?.id}:${project?.activeVariantId}:${focus?.id ?? ''}`
   const fittedFor = useRef<string>('')
   useEffect(() => {
     if (!design || size.w < 50) return
     if (fittedFor.current === frameKey) return
     fittedFor.current = frameKey
-    setView(fitView(design, size.w, size.h))
-  }, [frameKey, design, size])
+    setView(fitView(design, size.w, size.h, focus))
+  }, [frameKey, design, size, focus])
 
   useEffect(() => {
     const svg = svgRef.current
@@ -387,8 +423,10 @@ export function Editor2D() {
       const w = Math.abs(rect.b.x - rect.a.x)
       const h = Math.abs(rect.b.y - rect.a.y)
       if (w >= 0.5 && h >= 0.5) {
-        const { walls, room } = makeRectRoom(rect.a, rect.b, `Room ${design.rooms.length + 1}`)
+        const { walls, room } = makeRectRoom(rect.a, rect.b, `Room ${(fullDesign?.rooms.length ?? 0) + 1}`)
         updateDesign((d) => ({ ...d, walls: [...d.walls, ...walls], rooms: [...d.rooms, room] }))
+        // A new room lies outside the one in focus, so switch to it.
+        if (focus) focusRoom(room.id)
         select({ kind: 'room', id: room.id })
         setTool('select')
       }
@@ -409,13 +447,15 @@ export function Editor2D() {
   const startEndpointDrag = (e: React.PointerEvent, pt: Pt) => {
     e.stopPropagation()
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
+    // Use the whole design so walls of neighbouring (hidden) rooms that share this corner move with it.
+    const all = fullDesign ?? design
     const ends: { wallId: string; end: 'a' | 'b' }[] = []
-    for (const w of design.walls) {
+    for (const w of all.walls) {
       if (dist(w.a, pt) < 0.001) ends.push({ wallId: w.id, end: 'a' })
       if (dist(w.b, pt) < 0.001) ends.push({ wallId: w.id, end: 'b' })
     }
     const roomPts: { roomId: string; index: number }[] = []
-    for (const r of design.rooms) r.points.forEach((q, index) => dist(q, pt) < 0.001 && roomPts.push({ roomId: r.id, index }))
+    for (const r of all.rooms) r.points.forEach((q, index) => dist(q, pt) < 0.001 && roomPts.push({ roomId: r.id, index }))
     drag.current = { kind: 'endpoint', ends, roomPts, moved: false }
   }
 
@@ -453,7 +493,14 @@ export function Editor2D() {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={() => setCursor(null)}
-        onDoubleClick={() => chain.length && finishChain()}
+        onDoubleClick={(e) => {
+          if (chain.length) return finishChain()
+          // Double-clicking anywhere in a room (furniture included) opens it on its own.
+          if (!clickable || focus) return
+          const p = toWorld(e.clientX, e.clientY)
+          const room = design.rooms.find((r) => pointInPolygon(p, r.points))
+          if (room) focusRoom(room.id)
+        }}
         onContextMenu={(e) => {
           e.preventDefault()
           if (chain.length) finishChain()
@@ -503,14 +550,14 @@ export function Editor2D() {
 
           {/* Walls */}
           {design.walls.map((w) => {
-            const len = wallLength(w)
+            const [from, to] = visible?.spans.get(w.id) ?? [0, wallLength(w)]
             const selected = sel?.kind === 'wall' && sel.id === w.id
             return (
               <g key={w.id} transform={`translate(${w.a.x} ${w.a.y}) rotate(${deg(wallAngle(w))})`}>
                 <rect
-                  x={-w.thickness / 2}
+                  x={from - w.thickness / 2}
                   y={-w.thickness / 2}
-                  width={len + w.thickness}
+                  width={to - from + w.thickness}
                   height={w.thickness}
                   fill={selected ? '#2f80ed' : '#383c42'}
                   onPointerDown={(e) => {
@@ -679,7 +726,7 @@ export function Editor2D() {
         </g>
       </svg>
       <ScaleBar scale={s} />
-      <div className="plan-hint">{hintFor(tool, chain.length > 0)}</div>
+      <div className="plan-hint">{hintFor(tool, chain.length > 0, !!focus, design.rooms.length > 0)}</div>
       <div className="zoom-buttons">
         <button onClick={() => setView((v) => ({ ...v, scale: Math.min(MAX_SCALE, v.scale * 1.25) }))} title="Zoom in">
           +
@@ -687,7 +734,7 @@ export function Editor2D() {
         <button onClick={() => setView((v) => ({ ...v, scale: Math.max(MIN_SCALE, v.scale / 1.25) }))} title="Zoom out">
           −
         </button>
-        <button onClick={() => setView(fitView(design, size.w, size.h))} title="Fit to screen">
+        <button onClick={() => setView(fitView(design, size.w, size.h, focus))} title={focus ? 'Fit the room to the screen' : 'Fit to screen'}>
           ⤢
         </button>
       </div>
@@ -706,7 +753,7 @@ function layer(it: { catalogId: string; elevation?: number }): number {
   return getEntry(it.catalogId).symbol === 'rug' ? -1 : (it.elevation ?? 0)
 }
 
-function hintFor(tool: string, drawing: boolean): string {
+function hintFor(tool: string, drawing: boolean, focused: boolean, hasRooms: boolean): string {
   switch (tool) {
     case 'wall':
       return drawing ? 'Click to add corners · double-click, Enter or Esc to finish' : 'Click to start a wall'
@@ -719,7 +766,8 @@ function hintFor(tool: string, drawing: boolean): string {
     case 'place':
       return 'Click to place · hold Shift to place several · Esc to cancel'
     default:
-      return 'Drag to pan · scroll to zoom · drag items to move · R rotates · Del deletes'
+      if (focused) return 'Only this room is shown · drag items to move · R rotates · Del deletes'
+      return `Drag to pan · scroll to zoom · drag items to move${hasRooms ? ' · double-click a room to edit it alone' : ''}`
   }
 }
 

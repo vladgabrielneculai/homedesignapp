@@ -4,7 +4,7 @@ import { TEMPLATES } from '../catalog/templates'
 import { uid } from '../lib/geometry'
 import { productCatalogId, syncProducts } from '../catalog/products'
 import { deleteBlob } from '../lib/blobStore'
-import type { Design, Product, Project, Selection, Tool, Variant, ViewMode } from '../types'
+import type { Design, Product, Project, Room, Selection, Tool, Variant, ViewMode } from '../types'
 
 const HISTORY_LIMIT = 80
 
@@ -26,6 +26,8 @@ interface State {
   selection: Selection
   viewMode: ViewMode
   compare: [string, string] | null
+  /** When set, the plan and 3D view show only this room. */
+  focusRoomId: string | null
   history: History
 
   // Projects
@@ -61,6 +63,7 @@ interface State {
   setViewMode: (m: ViewMode) => void
   setCompare: (pair: [string, string] | null) => void
   setSnap: (v: boolean) => void
+  focusRoom: (roomId: string | null) => void
 }
 
 const emptyHistory = (): History => ({ past: [], future: [] })
@@ -166,6 +169,7 @@ export const useStore = create<State>()(
       selection: null,
       viewMode: 'split',
       compare: null,
+      focusRoomId: null,
       history: emptyHistory(),
 
       createProject: (name, templateId) => {
@@ -192,6 +196,7 @@ export const useStore = create<State>()(
           placeCatalogId: null,
           history: emptyHistory(),
           compare: null,
+          focusRoomId: null,
           viewMode: get().viewMode === 'compare' ? 'split' : get().viewMode,
         }),
 
@@ -266,6 +271,7 @@ export const useStore = create<State>()(
           }
         }),
 
+      // Variants made by duplicating share room ids, so the focused room carries over.
       switchVariant: (variantId) =>
         set((s) => ({
           projects: s.projects.map((p) => (p.id === s.currentProjectId ? { ...p, activeVariantId: variantId } : p)),
@@ -337,6 +343,14 @@ export const useStore = create<State>()(
       setViewMode: (viewMode) => set({ viewMode }),
       setCompare: (compare) => set({ compare }),
       setSnap: (snap) => set({ snap }),
+      focusRoom: (focusRoomId) =>
+        set((s) => ({
+          focusRoomId,
+          // Keep the selection only if it is the room itself.
+          selection: s.selection?.kind === 'room' && s.selection.id === focusRoomId ? s.selection : null,
+          tool: s.tool === 'room' ? 'select' : s.tool,
+          viewMode: s.viewMode === 'compare' ? 'split' : s.viewMode,
+        })),
     }),
     {
       name: 'home-designer-v1',
@@ -354,6 +368,14 @@ useStore.subscribe((s, prev) => {
 
 export function useDesign(): Design | undefined {
   return useStore((s) => activeVariant(currentProject(s))?.design)
+}
+
+/** The room being edited on its own, if any (ignores a focus on a room that no longer exists). */
+export function useFocusRoom(): Room | undefined {
+  return useStore((s) => {
+    const d = activeVariant(currentProject(s))?.design
+    return s.focusRoomId ? d?.rooms.find((r) => r.id === s.focusRoomId) : undefined
+  })
 }
 
 export function useProject(): Project | undefined {

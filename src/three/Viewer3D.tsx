@@ -66,7 +66,7 @@ function standingSpot(design: Design, poly: Pt[]): Pt {
 
 type Frame = ReturnType<typeof designFrame>
 
-function CameraRig({ frame, eyeLevel, resetToken, controls }: { frame: Frame; eyeLevel: boolean; resetToken: number; controls: React.RefObject<OrbitControlsImpl | null> }) {
+function CameraRig({ frame, eyeLevel, steep, resetToken, controls }: { frame: Frame; eyeLevel: boolean; steep?: boolean; resetToken: number; controls: React.RefObject<OrbitControlsImpl | null> }) {
   const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera
   const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
@@ -80,6 +80,10 @@ function CameraRig({ frame, eyeLevel, resetToken, controls }: { frame: Frame; ey
       camera.position.copy(eye)
       controls.current?.target.set(eye.x + dir.x, eye.y - 0.05, eye.z + dir.z)
       camera.fov = 65
+    } else if (steep) {
+      camera.position.set(center.x + radius * 0.55, radius * 1.9 + 2.5, center.z + radius * 1.05)
+      controls.current?.target.copy(center)
+      camera.fov = 45
     } else {
       camera.position.set(center.x + radius * 0.9, radius * 1.35 + 1.5, center.z + radius * 1.35)
       controls.current?.target.copy(center)
@@ -125,10 +129,18 @@ export interface Viewer3DProps {
   selectedItemId?: string | null
   onSelectItem?: (id: string | null) => void
   compact?: boolean
+  /** Showing a single room: look down more steeply so its walls don't hide the inside. */
+  singleRoom?: boolean
 }
 
-export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelectItem, compact }: Viewer3DProps) {
-  const [lowWalls, setLowWalls] = useState(false)
+export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelectItem, compact, singleRoom }: Viewer3DProps) {
+  const [lowWalls, setLowWalls] = useState(!!singleRoom)
+  // Open a single room with the walls cut down so nothing hides behind the near wall.
+  const [wasSingle, setWasSingle] = useState(singleRoom)
+  if (wasSingle !== singleRoom) {
+    setWasSingle(singleRoom)
+    setLowWalls(!!singleRoom)
+  }
   const [evening, setEvening] = useState(false)
   const [eyeLevel, setEyeLevel] = useState(false)
   const [realistic, setRealistic] = useState(() => (compact ? false : loadPrefs().realistic))
@@ -191,7 +203,7 @@ export function Viewer3D({ id, design, frameKey, label, selectedItemId, onSelect
             ? { minDistance: 0.6, maxDistance: 0.6, enableZoom: false, screenSpacePanning: false, minPolarAngle: Math.PI * 0.2, maxPolarAngle: Math.PI * 0.8, rotateSpeed: -0.5 }
             : { minDistance: 1, maxDistance: framed.radius * 6, maxPolarAngle: Math.PI / 2 - 0.05, minPolarAngle: 0, rotateSpeed: 1 })}
         />
-        <CameraRig frame={framed} eyeLevel={eyeLevel} resetToken={resetToken} controls={controls} />
+        <CameraRig frame={framed} eyeLevel={eyeLevel} steep={singleRoom} resetToken={resetToken} controls={controls} />
         <RegisterCanvas id={id} />
         {realistic && (
           <EffectComposer multisampling={0}>

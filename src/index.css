@@ -876,7 +876,13 @@ a {
 
 .room-list li {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-list li > .link {
+  flex: 1;
+  text-align: left;
 }
 
 .credit {
@@ -1192,7 +1198,7 @@ a {
     overflow-y: auto;
   }
 
-  .workspace .stage {
+  .workspace .stage-col {
     order: 1;
     min-height: 60vh;
   }
@@ -1588,4 +1594,48 @@ label.btn {
   .shop-table td:first-child {
     display: none;
   }
+}
+
+/* ---------- Room focus ---------- */
+.stage-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.stage-col > .stage {
+  flex: 1;
+}
+
+.focus-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  background: var(--brand-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.focus-banner .spacer {
+  flex: 1;
+}
+
+.room-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.room-picker select {
+  max-width: 160px;
+}
+
+.room-picker.active select {
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 600;
 }

@@ -9,6 +9,9 @@ in 3D. You can try different styles, keep several design variants side by side, 
   set room names and flooring. Includes grid snapping, live dimensions, and pan/zoom.
 - **Live 3D view**: an orbitable 3D model of the plan with shadows, textured floors, real door and window openings, a
   cutaway mode that lowers the walls, and an eye-level mode where you drag to look around and right-drag to walk.
+- **Edit one room at a time**: pick a room in the *Room* menu in the top bar, double-click it on the plan, or use
+  *Edit alone*. The plan and the 3D view then show only that room, with its own walls, doors, windows and furniture.
+  You can set its flooring, paint all its walls at once, and see a shopping list for that room only.
 - **Asset catalog**: about 60 procedurally generated furniture pieces (modern, living, dining, bedroom, kitchen, bathroom,
   office, decor) plus 6 realistic glTF models. The modern range includes wood slat wall panels, a floating TV media wall,
   a modular cloud sofa, a bouclé lounge chair, pendant lights, an arc lamp, a marble table, curtains, mirrors and wall
