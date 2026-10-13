@@ -76,7 +76,7 @@ export interface ProductInfo {
 
 export interface UserModelRef {
   key: string
-  format: 'glb' | 'gltf' | 'obj' | 'fbx'
+  format: 'glb' | 'gltf' | 'obj' | 'fbx' | 'dae'
   upAxis: 'y' | 'z'
   /** Extra rotation (degrees) so the model's front faces the item's front. */
   rotation: number

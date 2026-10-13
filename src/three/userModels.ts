@@ -2,16 +2,17 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'
+import { ColladaLoader } from 'three/examples/jsm/loaders/ColladaLoader.js'
 import { getEntry, type CatalogEntry, type UserModelRef } from '../catalog/catalog'
 import { getBlob } from '../lib/blobStore'
 
 const cache = new Map<string, Promise<THREE.Object3D>>()
 
-export const MODEL_EXTENSIONS = ['.glb', '.gltf', '.obj', '.fbx']
+export const MODEL_EXTENSIONS = ['.glb', '.gltf', '.obj', '.fbx', '.dae']
 
 export function formatFromName(name: string): UserModelRef['format'] | null {
   const ext = name.toLowerCase().split('.').pop()
-  return ext === 'glb' || ext === 'gltf' || ext === 'obj' || ext === 'fbx' ? ext : null
+  return ext === 'glb' || ext === 'gltf' || ext === 'obj' || ext === 'fbx' || ext === 'dae' ? ext : null
 }
 
 /** Parse a model file into a three.js object (without any scaling). */
@@ -36,6 +37,12 @@ export async function parseModel(blob: Blob, format: UserModelRef['format']): Pr
     }
     case 'fbx':
       return new FBXLoader().parse(await blob.arrayBuffer(), '')
+    case 'dae': {
+      // COLLADA, e.g. exported from SketchUp: the loader converts units and turns Z-up files upright.
+      const dae = new ColladaLoader().parse(await blob.text(), '')
+      if (!dae) throw new Error('Could not read the COLLADA file')
+      return dae.scene
+    }
   }
 }
 

@@ -836,6 +836,14 @@ a {
 
 .field-row.three .num-field input {
   padding: 6px 4px;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.field-row.three .num-field input::-webkit-outer-spin-button,
+.field-row.three .num-field input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .range-field {
@@ -1054,6 +1062,21 @@ a {
   background: var(--brand);
   border-color: var(--brand);
   color: #fff;
+}
+
+.viewer-tools .style-select {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
+}
+
+.viewer-tools.compact .style-select {
+  padding: 3px 6px;
+  font-size: 12px;
 }
 
 .viewer-tools.compact button {
@@ -1966,4 +1989,182 @@ label.btn {
 .calib-form em {
   font-style: normal;
   color: var(--muted);
+}
+
+/* ---- SketchUp-style modeling tools ---- */
+.model-tools {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  z-index: 2;
+}
+
+.model-tools button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #33373b;
+  cursor: pointer;
+}
+
+.model-tools button:hover {
+  background: #eef1f4;
+}
+
+.model-tools button.active {
+  background: var(--brand);
+  color: #fff;
+}
+
+.paint-palette {
+  position: absolute;
+  left: 58px;
+  top: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 22px);
+  gap: 4px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  z-index: 2;
+}
+
+.paint-palette .swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  padding: 0;
+  cursor: pointer;
+}
+
+.paint-palette .swatch.active {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.paint-palette .swatch.custom {
+  background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red);
+  position: relative;
+  overflow: hidden;
+}
+
+.paint-palette .swatch.custom input {
+  opacity: 0;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+
+.model-status {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.model-hint {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 9px;
+  font-size: 12px;
+  color: #3c4146;
+  max-width: 70%;
+}
+
+.vcb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 6px 4px 9px;
+  font-size: 12px;
+}
+
+.vcb em {
+  font-style: normal;
+  color: #6b7178;
+}
+
+.vcb span {
+  min-width: 92px;
+  padding: 2px 6px;
+  background: #f4f6f8;
+  border-radius: 5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.vcb span.typed {
+  background: #fff6d6;
+}
+
+.dim-label {
+  display: inline-block;
+  background: #ffffff;
+  border: 1px solid #c0392b;
+  color: #8e2a1f;
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dim-label.live {
+  border-color: #1f2937;
+  color: #1f2937;
+}
+
+@media (max-width: 720px) {
+  .model-tools button {
+    width: 30px;
+    height: 30px;
+  }
+  .model-hint {
+    display: none;
+  }
+}
+
+.big-number {
+  font-size: 26px;
+  font-weight: 700;
+  margin: 4px 0 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.banner.ok {
+  background: #eef7f1;
+  color: #23633f;
+  border: 1px solid #c4e2cf;
+}
+
+.sketchup-import {
+  margin: 8px 0;
 }

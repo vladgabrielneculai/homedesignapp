@@ -1,3 +1,4 @@
+import { ShapesScene } from './Shapes'
 import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
@@ -7,7 +8,7 @@ import { itemEntry, type CatalogEntry } from '../catalog/catalog'
 import { getFloor } from '../catalog/styles'
 import { itemColor, mix, paletteFor } from '../lib/colors'
 import { wallAngle, wallLength } from '../lib/geometry'
-import type { Design, Item, Opening, Room, Wall, WallFinish } from '../types'
+import type { Design, Item, Opening, Room, SolidMesh, Wall, WallFinish } from '../types'
 import { getPattern, wallFinish } from '../catalog/wallFinishes'
 import { wallInRoom } from '../lib/roomFocus'
 import { patternMaps, wallpaperMaps, type WallMaps } from './wallTextures'
@@ -23,6 +24,11 @@ export interface SceneOptions {
   evening?: boolean
   selectedItemId?: string | null
   onSelectItem?: (id: string | null) => void
+  /** Modeled shapes: selection, whether to draw their edges, and a live Push/Pull preview. */
+  selectedShapeIds?: string[]
+  shapeEdges?: boolean
+  shapePreview?: { shapeId: string; mesh: SolidMesh } | null
+  onSelectShape?: (id: string, add: boolean) => void
 }
 
 const LOW_WALL_HEIGHT = 1.0
@@ -194,7 +200,7 @@ function WallMesh({ wall, openings, style, lowWalls }: { wall: Wall; openings: O
   )
 
   return (
-    <group position={[mid.x, 0, mid.y]} rotation={[0, -ang, 0]}>
+    <group position={[mid.x, 0, mid.y]} rotation={[0, -ang, 0]} userData={{ wallId: wall.id }}>
       {pieces.map((p, i) => {
         const w = p.x1 - p.x0
         const h = p.y1 - p.y0
@@ -323,7 +329,7 @@ function RoomFloor({ room, fallback }: { room: Room; fallback: Design['style']['
   }, [floorId])
   useEffect(() => () => geometry.dispose(), [geometry])
   useEffect(() => () => material.dispose(), [material])
-  return <mesh geometry={geometry} material={material} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]} receiveShadow />
+  return <mesh geometry={geometry} material={material} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0]} receiveShadow userData={{ roomId: room.id }} />
 }
 
 /** Flat white ceiling over a room (faces down, so it is invisible from above) with a flush light. */
@@ -399,7 +405,7 @@ function ItemMesh({ item, style, palette, selected, evening, onSelect }: { item:
       }
     : undefined
   return (
-    <group position={[item.x, item.elevation ?? 0, item.y]} rotation={[0, (-item.rotation * Math.PI) / 180, 0]} onClick={handleClick}>
+    <group position={[item.x, item.elevation ?? 0, item.y]} rotation={[0, (-item.rotation * Math.PI) / 180, 0]} onClick={handleClick} userData={{ itemId: item.id }}>
       {entry.model ? (
         <Suspense fallback={<Placeholder entry={entry} />}>
           <ModelItem entry={entry} />
@@ -455,6 +461,7 @@ export function HouseScene({ design, options }: { design: Design; options: Scene
           onSelect={options.onSelectItem}
         />
       ))}
+      <ShapesScene design={design} selectedIds={options.selectedShapeIds ?? []} edges={options.shapeEdges ?? true} preview={options.shapePreview} onSelect={options.onSelectShape} />
     </group>
   )
 }

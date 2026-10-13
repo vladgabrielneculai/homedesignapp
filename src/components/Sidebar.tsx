@@ -10,6 +10,7 @@ import { PlanSymbol } from './PlanSymbol'
 import { ProductDialog } from './ProductDialog'
 import { UnderlayPanel } from './UnderlayPanel'
 import { ThumbnailStudio, useCatalogThumb } from '../three/ThumbnailStudio'
+import { importSketchUp, SKETCHUP_ACCEPT } from '../lib/sketchupImport'
 
 type Tab = 'build' | 'furnish' | 'style'
 
@@ -98,6 +99,47 @@ function CardImage({ e, style }: { e: CatalogEntry; style: StyleSettings }) {
   return <CatalogThumb e={e} style={style} />
 }
 
+/** Opens a SketchUp model (.skp through the local helper, or a .dae export) and places it. */
+function SketchUpImport() {
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ error: boolean; text: string } | null>(null)
+  const open = async (file: File) => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const name = await importSketchUp(file)
+      setMsg({ error: false, text: `${name} was added to My products and placed in the middle of the home.` })
+    } catch (e) {
+      setMsg({ error: true, text: e instanceof Error ? e.message : 'Could not open the file.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <label className={'btn full sketchup-import' + (busy ? ' disabled' : '')} title="SketchUp .skp files (needs the local helper, see README) or .dae exports">
+        {busy ? 'Opening SketchUp model…' : 'Open SketchUp model (.skp, .dae)…'}
+        <input
+          type="file"
+          accept={SKETCHUP_ACCEPT}
+          hidden
+          disabled={busy}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            e.target.value = ''
+            if (f) open(f)
+          }}
+        />
+      </label>
+      {msg && (
+        <div className={'banner small ' + (msg.error ? 'error' : 'ok')} role={msg.error ? 'alert' : 'status'}>
+          {msg.text}
+        </div>
+      )}
+    </>
+  )
+}
+
 function FurnishPanel() {
   const design = useDesign()
   const placing = useStore((s) => s.placeCatalogId)
@@ -134,6 +176,7 @@ function FurnishPanel() {
           + Add a product from a shop
         </button>
       )}
+      <SketchUpImport />
       {cat === 'My products' && !products.length && (
         <div className="empty-hint">
           <strong>Use real furniture from IKEA or any store</strong>

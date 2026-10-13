@@ -5,7 +5,7 @@ import { uid } from '../lib/geometry'
 import { productCatalogId, syncProducts } from '../catalog/products'
 import { deleteBlob } from '../lib/blobStore'
 import { forgetWallpaper } from '../three/wallTextures'
-import type { Design, Product, Project, Room, Selection, Tool, Variant, ViewMode, Wallpaper } from '../types'
+import type { Design, ModelTool, Product, Project, Room, Selection, Tool, Variant, ViewMode, Wallpaper } from '../types'
 
 const HISTORY_LIMIT = 80
 
@@ -31,6 +31,10 @@ interface State {
   /** When set, the plan and 3D view show only this room. */
   focusRoomId: string | null
   history: History
+  /** SketchUp-style tool of the 3D view, and whether keys go to it (the 3D view was used last). */
+  modelTool: ModelTool
+  modelKeys: boolean
+  paintColor: string
 
   // Projects
   createProject: (name: string, templateId: string) => string
@@ -71,6 +75,9 @@ interface State {
   setCompare: (pair: [string, string] | null) => void
   setSnap: (v: boolean) => void
   focusRoom: (roomId: string | null) => void
+  setModelTool: (t: ModelTool) => void
+  setModelKeys: (v: boolean) => void
+  setPaintColor: (c: string) => void
 }
 
 const emptyHistory = (): History => ({ past: [], future: [] })
@@ -179,6 +186,9 @@ export const useStore = create<State>()(
       compare: null,
       focusRoomId: null,
       history: emptyHistory(),
+      modelTool: 'select',
+      modelKeys: false,
+      paintColor: '#c9a27e',
 
       createProject: (name, templateId) => {
         const template = TEMPLATES.find((t) => t.id === templateId) ?? TEMPLATES[0]
@@ -383,6 +393,9 @@ export const useStore = create<State>()(
       setViewMode: (viewMode) => set({ viewMode }),
       setCompare: (compare) => set({ compare }),
       setSnap: (snap) => set({ snap }),
+      setModelTool: (modelTool) => set({ modelTool }),
+      setModelKeys: (modelKeys) => set({ modelKeys }),
+      setPaintColor: (paintColor) => set({ paintColor }),
       focusRoom: (focusRoomId) =>
         set((s) => ({
           focusRoomId,

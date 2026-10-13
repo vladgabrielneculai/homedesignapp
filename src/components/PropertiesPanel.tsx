@@ -11,6 +11,11 @@ import { useDesign, useFocusRoom, useStore } from '../state/store'
 import { floorPatternUrl } from '../three/textures'
 import type { Design, FloorId, Room, WallFinish, WallSide } from '../types'
 import { ProductDialog } from './ProductDialog'
+import { PAINTS } from './ModelToolbar'
+import { deleteShapes, duplicateShapes, explodeShape, groupShapes, makeComponent, makeUnique, paintFace, patchShape, resizeShape, shapeSize } from '../lib/shapeOps'
+import { componentOf, vec } from '../lib/solid'
+import { formatLength, SHAPE_COLOR } from '../three/Shapes'
+import type { Vec3 } from '../types'
 
 function NumberField({ label, value, step = 0.01, min, max, unit = 'm', onChange }: { label: string; value: number; step?: number; min?: number; max?: number; unit?: string; onChange: (v: number) => void }) {
   return (
@@ -45,6 +50,10 @@ export function deleteSelection() {
         return { ...d, openings: d.openings.filter((o) => o.id !== selection.id) }
       case 'room':
         return { ...d, rooms: d.rooms.filter((r) => r.id !== selection.id) }
+      case 'shapes':
+        return { ...d, shapes: (d.shapes ?? []).filter((x) => !selection.ids.includes(x.id)) }
+      case 'dimension':
+        return { ...d, dimensions: (d.dimensions ?? []).filter((x) => x.id !== selection.id) }
     }
   })
   select(null)
@@ -88,6 +97,8 @@ export function PropertiesPanel() {
       {selection?.kind === 'wall' && <WallProps id={selection.id} design={design} />}
       {selection?.kind === 'opening' && <OpeningProps id={selection.id} design={design} />}
       {selection?.kind === 'room' && <RoomProps id={selection.id} design={design} />}
+      {selection?.kind === 'shapes' && <ShapeProps ids={selection.ids} design={design} />}
+      {selection?.kind === 'dimension' && <DimensionProps id={selection.id} design={design} />}
     </aside>
   )
 }
@@ -423,6 +434,122 @@ function RoomProps({ id, design }: { id: string; design: Design }) {
         Remove room floor
       </button>
       <p className="muted small">Removing the room keeps its walls.</p>
+    </div>
+  )
+}
+
+/** Properties of modeled shapes: size, position, rotation, paint, groups and components. */
+function ShapeProps({ ids, design }: { ids: string[]; design: Design }) {
+  const shapes = (design.shapes ?? []).filter((s) => ids.includes(s.id))
+  const [compName, setCompName] = useState('')
+  if (!shapes.length) return null
+  if (shapes.length > 1)
+    return (
+      <div className="panel">
+        <h3>{shapes.length} shapes selected</h3>
+        <p className="muted small">Group them to move and edit them as one object, or make a component so copies stay identical.</p>
+        <div className="btn-row">
+          <button className="btn small primary" onClick={() => groupShapes(ids)}>
+            Make group
+          </button>
+          <button className="btn small" onClick={() => makeComponent(ids, compName.trim() || 'Component')}>
+            Make component
+          </button>
+          <button className="btn small" onClick={() => duplicateShapes(ids)}>
+            Duplicate
+          </button>
+        </div>
+        <input className="input" placeholder="Component name" value={compName} onChange={(e) => setCompName(e.target.value)} />
+        <button className="btn danger full" onClick={() => deleteShapes(ids)}>
+          Delete {shapes.length} shapes
+        </button>
+      </div>
+    )
+  const s = shapes[0]
+  const comp = componentOf(design, s)
+  const copies = comp ? (design.shapes ?? []).filter((x) => x.componentId === comp.id).length : 0
+  const size = shapeSize(design, s)
+  const setSize = (i: number, cm: number) => {
+    const next = [...size] as Vec3
+    next[i] = Math.max(0.005, cm / 100)
+    resizeShape(s.id, next)
+  }
+  const color = s.color ?? SHAPE_COLOR
+  return (
+    <div className="panel">
+      <h3>{comp ? comp.name : (s.name ?? 'Shape')}</h3>
+      <p className="muted small">{comp ? `Component · ${copies} ${copies === 1 ? 'copy' : 'copies'} share this geometry: Push/Pull on one changes all.` : 'Drawn shape. Use Push/Pull (P) on its faces in the 3D view.'}</p>
+      {!comp && (
+        <label className="field">
+          <span>Name</span>
+          <input className="input" value={s.name ?? ''} onChange={(e) => patchShape(s.id, { name: e.target.value }, false)} onFocus={() => useStore.getState().checkpoint()} />
+        </label>
+      )}
+      <div className="field-row three">
+        <NumberField label="W" value={Math.round(size[0] * 1000) / 10} step={1} min={0.5} unit="cm" onChange={(v) => setSize(0, v)} />
+        <NumberField label="D" value={Math.round(size[2] * 1000) / 10} step={1} min={0.5} unit="cm" onChange={(v) => setSize(2, v)} />
+        <NumberField label="H" value={Math.round(size[1] * 1000) / 10} step={1} min={0.5} unit="cm" onChange={(v) => setSize(1, v)} />
+      </div>
+      <div className="field-row three">
+        <NumberField label="X" value={Math.round(s.position[0] * 100) / 100} step={0.05} onChange={(x) => patchShape(s.id, { position: [x, s.position[1], s.position[2]] })} />
+        <NumberField label="Y" value={Math.round(s.position[2] * 100) / 100} step={0.05} onChange={(z) => patchShape(s.id, { position: [s.position[0], s.position[1], z] })} />
+        <NumberField label="↑" value={Math.round(s.position[1] * 100) / 100} step={0.05} onChange={(y) => patchShape(s.id, { position: [s.position[0], y, s.position[2]] })} />
+      </div>
+      <label className="range-field">
+        <span>Rotation</span>
+        <input
+          type="range"
+          min={-180}
+          max={180}
+          step={1}
+          value={Math.round(-s.rotation[1])}
+          onPointerDown={() => useStore.getState().checkpoint()}
+          onChange={(e) => patchShape(s.id, { rotation: [s.rotation[0], -Number(e.target.value), s.rotation[2]] }, false)}
+        />
+        <em>{Math.round(-s.rotation[1])}°</em>
+      </label>
+      <h4>Paint</h4>
+      <div className="swatches">
+        {PAINTS.map((c) => (
+          <button key={c} className={'swatch' + (color === c ? ' active' : '')} style={{ background: c }} onClick={() => paintFace(s.id, null, c)} aria-label={`Paint ${c}`} />
+        ))}
+      </div>
+      <p className="muted small">The Paint bucket (B) in the 3D view paints single faces.</p>
+      <div className="btn-row">
+        <button className="btn small" onClick={() => duplicateShapes([s.id])}>
+          Duplicate
+        </button>
+        {comp ? (
+          <button className="btn small" onClick={() => makeUnique(s.id)}>
+            Make unique
+          </button>
+        ) : (
+          <button className="btn small" onClick={() => makeComponent([s.id], compName.trim() || s.name || 'Component')}>
+            Make component
+          </button>
+        )}
+        <button className="btn small" onClick={() => explodeShape(s.id)}>
+          Explode
+        </button>
+      </div>
+      {!comp && <input className="input" placeholder="Component name (optional)" value={compName} onChange={(e) => setCompName(e.target.value)} />}
+      <button className="btn danger full" onClick={() => deleteShapes([s.id])}>
+        Delete shape
+      </button>
+    </div>
+  )
+}
+
+function DimensionProps({ id, design }: { id: string; design: Design }) {
+  const d = design.dimensions?.find((x) => x.id === id)
+  if (!d) return null
+  return (
+    <div className="panel">
+      <h3>Measurement</h3>
+      <p className="big-number">{formatLength(vec(d.a).distanceTo(vec(d.b)))}</p>
+      <button className="btn danger full" onClick={deleteSelection}>
+        Delete measurement
+      </button>
     </div>
   )
 }

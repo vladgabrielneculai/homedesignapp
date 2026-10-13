@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as THREE from 'three'
 import { getEntry, itemEntry, MAX_SIZE, MIN_SIZE, surfaceHeight, type CatalogEntry } from '../catalog/catalog'
 import { getFloor } from '../catalog/styles'
 import { makeOpening, makeRectRoom, WALL_HEIGHT, WALL_THICKNESS } from '../catalog/templates'
@@ -28,6 +29,9 @@ import { useDesign, useFocusRoom, useProject, useStore } from '../state/store'
 import { floorPatternUrl } from '../three/textures'
 import type { Design, Item, Opening, Pt, Room, Wall } from '../types'
 import { PlanSymbol } from './PlanSymbol'
+import { faceNormal, meshOf, shapeMatrix, vec } from '../lib/solid'
+import { SHAPE_COLOR } from '../three/Shapes'
+import type { Shape } from '../types'
 
 const GRID = 0.1
 const MIN_SCALE = 8
@@ -51,6 +55,7 @@ type Drag =
   | { kind: 'opening'; id: string; moved: boolean }
   | { kind: 'roomRect'; start: Pt }
   | { kind: 'underlay'; start: Pt; x0: number; y0: number; moved: boolean }
+  | { kind: 'shape'; ids: string[]; start: Pt; pos0: Record<string, [number, number]>; moved: boolean }
 
 const deg = (r: number) => (r * 180) / Math.PI
 
@@ -146,7 +151,7 @@ export function Editor2D() {
   const { tool, selection, placeCatalogId, snap: snapOn } = useStore()
   const { updateDesign, checkpoint, select, setTool, focusRoom } = useStore.getState()
   const visible = useMemo(
-    () => fullDesign && visiblePart(fullDesign, focus, selection && selection.kind !== 'room' ? selection.id : undefined),
+    () => fullDesign && visiblePart(fullDesign, focus, selection && 'id' in selection && selection.kind !== 'room' ? selection.id : undefined),
     [fullDesign, focus, selection],
   )
   const design = visible?.design
@@ -373,6 +378,23 @@ export function Editor2D() {
         )
         break
       }
+      case 'shape': {
+        if (!dr.moved) {
+          checkpoint()
+          dr.moved = true
+        }
+        const step = grid ? 0.05 : 0
+        const dx = snap(p.x - dr.start.x, step)
+        const dy = snap(p.y - dr.start.y, step)
+        updateDesign(
+          (d) => ({
+            ...d,
+            shapes: (d.shapes ?? []).map((sh) => (dr.pos0[sh.id] ? { ...sh, position: [dr.pos0[sh.id][0] + dx, sh.position[1], dr.pos0[sh.id][1] + dy] } : sh)),
+          }),
+          { record: false },
+        )
+        break
+      }
       case 'rotate': {
         const it = design.items.find((i) => i.id === dr.id)
         if (!it) break
@@ -507,6 +529,18 @@ export function Editor2D() {
     const p = toWorld(e.clientX, e.clientY)
     select({ kind: 'item', id })
     drag.current = { kind: 'item', id, dx: p.x - it.x, dy: p.y - it.y, moved: false }
+  }
+
+  const startShapeDrag = (e: React.PointerEvent, id: string) => {
+    if (tool !== 'select' || e.button !== 0 || spaceDown.current) return
+    e.stopPropagation()
+    ;(e.target as Element).setPointerCapture?.(e.pointerId)
+    const cur = useStore.getState().selection
+    const ids = e.shiftKey && cur?.kind === 'shapes' ? (cur.ids.includes(id) ? cur.ids.filter((x) => x !== id) : [...cur.ids, id]) : cur?.kind === 'shapes' && cur.ids.includes(id) ? cur.ids : [id]
+    select(ids.length ? { kind: 'shapes', ids } : null)
+    const pos0: Record<string, [number, number]> = {}
+    for (const sh of design.shapes ?? []) if (ids.includes(sh.id)) pos0[sh.id] = [sh.position[0], sh.position[2]]
+    drag.current = { kind: 'shape', ids, start: toWorld(e.clientX, e.clientY), pos0, moved: false }
   }
 
   const startEndpointDrag = (e: React.PointerEvent, pt: Pt) => {
@@ -718,6 +752,19 @@ export function Editor2D() {
                 </g>
               )
             })}
+
+          {/* Modeled shapes, seen from above */}
+          {(design.shapes ?? []).map((sh) => (
+            <ShapePlan
+              key={sh.id}
+              shape={sh}
+              design={design}
+              px={px}
+              selected={sel?.kind === 'shapes' && sel.ids.includes(sh.id)}
+              className={clickable ? 'item hoverable' : 'item'}
+              onPointerDown={(e) => startShapeDrag(e, sh.id)}
+            />
+          ))}
 
           {/* Room labels */}
           {design.rooms.map((r) => {
@@ -1082,5 +1129,44 @@ function ScaleBar({ scale }: { scale: number }) {
       <div style={{ width: meters * scale }} />
       <span>{meters} m</span>
     </div>
+  )
+}
+
+/** Top view of a modeled shape: its upward faces filled, every edge drawn. */
+function ShapePlan({ shape, design, px, selected, className, onPointerDown }: { shape: Shape; design: Design; px: (n: number) => number; selected: boolean; className: string; onPointerDown: (e: React.PointerEvent) => void }) {
+  const mesh = meshOf(design, shape)
+  const drawn = useMemo(() => {
+    if (!mesh) return null
+    const m = shapeMatrix(shape)
+    const nm = new THREE.Matrix3().getNormalMatrix(m)
+    const pts = mesh.verts.map((p) => vec(p).applyMatrix4(m))
+    const faces = mesh.faces
+      .map((f, i) => ({ f, i, n: faceNormal(mesh, i).applyMatrix3(nm).normalize(), top: Math.max(...f.map((k) => pts[k].y)) }))
+      .filter((x) => x.n.y > 0.2)
+      .sort((a, b) => a.top - b.top)
+      .map((x) => ({ d: x.f.map((k) => `${pts[k].x},${pts[k].z}`).join(' '), color: mesh.faceColors?.[x.i] ?? shape.color ?? SHAPE_COLOR }))
+    const seen = new Set<string>()
+    const lines: string[] = []
+    for (const f of mesh.faces)
+      for (let i = 0; i < f.length; i++) {
+        const a = pts[f[i]]
+        const b = pts[f[(i + 1) % f.length]]
+        if (Math.hypot(a.x - b.x, a.z - b.z) < 1e-4) continue
+        const k = [a.x, a.z, b.x, b.z].map((v) => v.toFixed(3))
+        const key = k[0] + k[1] < k[2] + k[3] ? k.join() : [k[2], k[3], k[0], k[1]].join()
+        if (seen.has(key)) continue
+        seen.add(key)
+        lines.push(`M${a.x} ${a.z}L${b.x} ${b.z}`)
+      }
+    return { faces, path: lines.join('') }
+  }, [mesh, shape])
+  if (!drawn) return null
+  return (
+    <g className={className} onPointerDown={onPointerDown}>
+      {drawn.faces.map((f, i) => (
+        <polygon key={i} points={f.d} fill={f.color} fillOpacity={0.85} stroke="none" />
+      ))}
+      <path d={drawn.path} fill="none" stroke={selected ? '#2f80ed' : '#3a3a3a'} strokeWidth={px(selected ? 2 : 1)} strokeLinecap="round" />
+    </g>
   )
 }

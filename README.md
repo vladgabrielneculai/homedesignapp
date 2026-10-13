@@ -46,6 +46,26 @@ in 3D. You can try different styles, keep several design variants side by side, 
   sky light comes in through the windows, and shadows and reflections are physically based. Choose Draft, Good or
   Best quality and up to 4K. The image keeps getting cleaner and can be saved at any point. This needs a reasonably
   modern graphics card.
+- **SketchUp-style modeling** in the 3D view, for things the catalog doesn't have (built-ins, a kitchen island, a
+  window seat, steps, a terrace planter). A tool palette on the left of the 3D view has Select, Line, Rectangle,
+  Circle, Push/Pull, Move, Rotate, Scale, Tape measure, Paint bucket and Eraser, with SketchUp's keys (`Space`, `L`,
+  `R`, `C`, `P`, `M`, `Q`, `S`, `T`, `B`, `E`). Draw a rectangle on the floor, a wall or another shape, then
+  Push/Pull it into a solid. Pulling a face that has square sides stretches the shape, as in SketchUp. While a tool
+  is in use, type an exact value and press Enter, like SketchUp's Measurements box: `2.4` or `240cm` for a
+  distance, `1.2;0.6` for a rectangle, `45` degrees for Rotate, or `1.5` for Scale. Points snap to corners (green),
+  midpoints (cyan) and the red, green and blue axes. In Move, hold `Ctrl` to drop a copy and press `↑` to move up
+  or down. The Paint bucket paints faces of shapes, either side of a wall, or furniture.
+  Select several shapes (`Shift`-click) to *Make group* or *Make component*. Copies of a component share their
+  geometry, so pulling a face on one changes all of them. *Make unique* and *Explode* undo that. Shapes also show
+  and drag in the 2D plan, export with the project and appear in photo renders.
+- **SketchUp navigation and styles**: the middle mouse button orbits (`Shift`+middle pans), the wheel zooms toward
+  the cursor, and *Views* gives Iso, Top, Front, Back, Left and Right cameras. The style menu switches between
+  *Realistic*, *Shaded*, *SketchUp* (black edges and profiles on a sky gradient), *Hidden line*, *X-ray*,
+  *Monochrome* and *Sketchy* (pencil lines on paper).
+- **Open SketchUp files**: *Furnish → Open SketchUp model* reads `.skp` files, including 3D Warehouse downloads,
+  through the local helper (below). It also reads `.dae` (COLLADA) files exported from any SketchUp, including the
+  free web version, directly in the browser. The model keeps its real size, materials and textures, is added to
+  *My products*, and is placed in the middle of the home.
 - **Style presets**: Scandinavian, Modern, Industrial, Classic, Boho and Japandi. Each preset changes wall paint,
   flooring and the furniture palette in one click. You can also set custom paint, accent walls, per-room floors and
   per-item colors.
@@ -67,6 +87,28 @@ npm run preview  # serve the production build
 The build uses a relative base path, so you can host the `dist/` folder as-is (GitHub Pages, Vercel, Netlify or any
 static file server).
 
+### Opening `.skp` files (local helper)
+
+SketchUp's file format is closed. It can only be read with Trimble's official SketchUp SDK, which is free but can't
+be shipped with this app, and is available for Windows and macOS only. The app opens `.skp` files through a small
+helper built into the Vite server, so it works with `npm run dev` or `npm run preview` on your own computer. Files are
+converted locally and never uploaded anywhere.
+
+1. Sign in at [developer.sketchup.com](https://developer.sketchup.com), download the latest **SketchUp C SDK** for
+   your system, and unzip it. Use the newest version, because files saved by a SketchUp newer than the SDK can't be
+   opened.
+2. Create a file called `.env.local` next to `package.json` (copy `.env.example`) and point it to the folder that
+   contains `SketchUpAPI.dll`, or `SketchUpAPI.framework` on a Mac:
+
+   ```
+   SKETCHUP_SDK_DIR=C:\SketchUpSDK\binaries\sketchup\x64
+   ```
+
+3. Restart `npm run dev`, then use *Furnish → Open SketchUp model*.
+
+Without the SDK, export from SketchUp as COLLADA (`File → Export → 3D Model → .dae`) and open the `.dae` instead.
+The hosted static build has no helper, so it can only open `.dae`.
+
 ## Keyboard shortcuts
 
 | Key | Action |
@@ -80,6 +122,17 @@ static file server).
 | `Esc` | Finish drawing / cancel tool / clear selection |
 | `Space` + drag, or right-drag | Pan while another tool is active |
 
+In the 3D view (after clicking in it), the SketchUp keys apply:
+
+| Key | Action |
+| --- | --- |
+| `Space` / `L` / `R` / `C` / `P` | Select / Line / Rectangle / Circle / Push/Pull |
+| `M` / `Q` / `S` / `T` / `B` / `E` | Move / Rotate / Scale / Tape measure / Paint bucket / Eraser |
+| Type a value, then `Enter` | Exact length, size (`w;d`), angle or scale for the current tool |
+| `Ctrl` while moving / `↑` | Move a copy / move vertically |
+| `Esc` | Cancel the current operation, then go back to Select |
+| Middle-drag / `Shift`+middle-drag / wheel | Orbit / pan / zoom |
+
 ## Project structure
 
 ```
@@ -90,7 +143,9 @@ src/
   lib/          geometry, color, export, room focus, sun position and plan import helpers
   state/        zustand store (projects, variants, wallpapers, history, persistence)
   three/        3D scene: procedural furniture, walls/openings, textures and wall patterns, sky and garden,
-                catalog preview renderer, path-traced photos, user model loading, viewer
+                catalog preview renderer, path-traced photos, user model loading, viewer, modeled shapes,
+                SketchUp-style tools and display styles
+server/         local helper for the Vite server: reads .skp files with the SketchUp SDK and returns glTF
 public/models/  glTF furniture models (see CREDITS.md)
 ```
 
@@ -105,7 +160,9 @@ product are listed in `PRODUCT_SHAPES` in `src/catalog/catalog.ts`.
 - **glTF/GLB model**: copy the `.glb` into `public/models/` and add a catalog entry with a `model` field
   (`url`, `credit`, `license`, `source`). The model is scaled automatically to fit the entry's `w × d × h` footprint.
 
-Units are meters throughout. Plan coordinates use `(x, y)`, and plan `y` maps to world `z` in 3D.
+Units are meters throughout. Plan coordinates use `(x, y)`, and plan `y` maps to world `z` in 3D. Modeled shapes
+(`Design.shapes`) are polygon meshes stored as JSON. Component definitions are in `Design.components`, and the
+geometry operations, such as Push/Pull, live in `src/lib/solid.ts`.
 
 ## Credits
 

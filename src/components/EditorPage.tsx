@@ -202,7 +202,7 @@ export function EditorPage() {
             ) : (
               <>
                 {viewMode !== '3d' && (
-                  <section className="pane pane-2d">
+                  <section className="pane pane-2d" onPointerDownCapture={() => useStore.getState().setModelKeys(false)}>
                     <Editor2D />
                   </section>
                 )}

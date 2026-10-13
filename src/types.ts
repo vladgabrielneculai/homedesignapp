@@ -99,11 +99,57 @@ export interface StyleSettings {
   accent: string
 }
 
+/** A point or vector in 3D: x and z are plan x and plan y, y is height above the floor (meters). */
+export type Vec3 = [number, number, number]
+
+/** Polygon mesh of a modeled shape: SketchUp-style faces (any number of corners, flat). */
+export interface SolidMesh {
+  verts: Vec3[]
+  /** Each face lists vertex indices counter-clockwise when seen from outside. */
+  faces: number[][]
+  /** Paint per face (null: the shape's color). */
+  faceColors?: (string | null)[]
+}
+
+/**
+ * Something modeled with the SketchUp tools (a box pulled up from a rectangle, a shelf, a step...).
+ * Its geometry is its own mesh or, for a component instance, the component's shared mesh.
+ */
+export interface Shape {
+  id: string
+  name?: string
+  mesh?: SolidMesh
+  componentId?: string
+  position: Vec3
+  /** Euler angles in degrees (XYZ order). */
+  rotation: Vec3
+  scale: Vec3
+  color?: string
+}
+
+/** A component definition: every instance shares this geometry, so editing one edits all. */
+export interface ComponentDef {
+  id: string
+  name: string
+  mesh: SolidMesh
+}
+
+/** A measurement left by the Tape measure tool. */
+export interface Dimension {
+  id: string
+  a: Vec3
+  b: Vec3
+}
+
 export interface Design {
   walls: Wall[]
   openings: Opening[]
   rooms: Room[]
   items: Item[]
+  /** Modeled shapes (see Shape), component definitions and tape measurements. */
+  shapes?: Shape[]
+  components?: ComponentDef[]
+  dimensions?: Dimension[]
   style: StyleSettings
   /** Where the home is and which way it faces, for real sun positions. */
   site?: Site
@@ -165,7 +211,12 @@ export type Selection =
   | { kind: 'wall'; id: string }
   | { kind: 'opening'; id: string }
   | { kind: 'room'; id: string }
+  | { kind: 'shapes'; ids: string[] }
+  | { kind: 'dimension'; id: string }
   | null
+
+/** SketchUp-style tools of the 3D view. */
+export type ModelTool = 'select' | 'line' | 'rect' | 'circle' | 'push' | 'move' | 'rotate' | 'scale' | 'tape' | 'paint' | 'erase'
 
 export type ViewMode = '2d' | '3d' | 'split' | 'compare'
 
@@ -189,6 +240,6 @@ export interface Product {
   /** Small JPEG data URL of the product photo. */
   photo?: string
   /** Uploaded 3D model, stored in IndexedDB. */
-  model?: { key: string; fileName: string; format: 'glb' | 'gltf' | 'obj' | 'fbx'; upAxis: 'y' | 'z'; rotation: number }
+  model?: { key: string; fileName: string; format: 'glb' | 'gltf' | 'obj' | 'fbx' | 'dae'; upAxis: 'y' | 'z'; rotation: number }
   createdAt: number
 }
