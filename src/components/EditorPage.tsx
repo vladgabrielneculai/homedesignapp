@@ -6,6 +6,7 @@ import { capture3D, Viewer3D } from '../three/Viewer3D'
 import type { ViewMode } from '../types'
 import { Editor2D, planSvgs } from './Editor2D'
 import { deleteSelection, duplicateSelectedItem, nudgeSelectedItem, PropertiesPanel, rotateSelectedItem } from './PropertiesPanel'
+import { ShoppingList } from './ShoppingList'
 import { Sidebar } from './Sidebar'
 import { MiniPlan } from './TemplatePreview'
 
@@ -79,6 +80,7 @@ export function EditorPage() {
   const canRedo = useStore((s) => s.history.future.length > 0)
   const { openProject, renameProject, setViewMode, undo, redo, select } = useStore.getState()
   const [menuOpen, setMenuOpen] = useState(false)
+  const [shopping, setShopping] = useState(false)
   useShortcuts()
 
   // Refresh the project thumbnail a few seconds after edits settle.
@@ -133,6 +135,9 @@ export function EditorPage() {
             </button>
           ))}
         </div>
+        <button className="btn" onClick={() => setShopping(true)} title="Products, quantities and prices in this design">
+          Shopping list
+        </button>
         <div className="menu-wrap">
           <button className="btn primary" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen}>
             Export ▾
@@ -145,7 +150,7 @@ export function EditorPage() {
               <button onClick={exportPlan} disabled={viewMode === '3d' || viewMode === 'compare'}>
                 Floor plan as PNG
               </button>
-              <button onClick={() => exportProjectJson(project)}>Project file (.json)</button>
+              <button onClick={() => exportProjectJson(project, useStore.getState().products)}>Project file (.json)</button>
             </div>
           )}
         </div>
@@ -180,6 +185,7 @@ export function EditorPage() {
         {viewMode !== 'compare' && <PropertiesPanel />}
       </div>
       <VariantsBar />
+      {shopping && <ShoppingList design={variant.design} title={`${project.name} – ${variant.name}`} onClose={() => setShopping(false)} />}
     </div>
   )
 }

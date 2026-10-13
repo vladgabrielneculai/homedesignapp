@@ -1,4 +1,6 @@
-import type { Project } from '../types'
+import { productCatalogId } from '../catalog/products'
+import type { Product, Project } from '../types'
+import { blobToDataUrl, dataUrlToBlob, getBlob, putBlob } from './blobStore'
 
 export function download(filename: string, href: string) {
   const a = document.createElement('a')
@@ -44,10 +46,23 @@ export async function svgToPng(svg: SVGSVGElement, ratio = 2): Promise<string> {
 
 export const PROJECT_FILE_VERSION = 1
 
-export function exportProjectJson(p: Project) {
+/** Shop products a project uses, with their 3D model files embedded as data URLs. */
+async function productsFor(p: Project, all: Product[]): Promise<(Product & { modelData?: string })[]> {
+  const used = new Set(p.variants.flatMap((v) => v.design.items.map((i) => i.catalogId)))
+  const list = all.filter((x) => used.has(productCatalogId(x)))
+  return Promise.all(
+    list.map(async (x) => {
+      const blob = x.model ? await getBlob(x.model.key).catch(() => undefined) : undefined
+      return blob ? { ...x, modelData: await blobToDataUrl(blob) } : x
+    }),
+  )
+}
+
+export async function exportProjectJson(p: Project, allProducts: Product[] = []) {
   const { thumbnail: _thumbnail, ...rest } = p
   void _thumbnail
-  const blob = new Blob([JSON.stringify({ app: 'home-designer', version: PROJECT_FILE_VERSION, project: rest }, null, 2)], {
+  const products = await productsFor(p, allProducts)
+  const blob = new Blob([JSON.stringify({ app: 'home-designer', version: PROJECT_FILE_VERSION, project: rest, products }, null, 2)], {
     type: 'application/json',
   })
   const url = URL.createObjectURL(blob)
@@ -55,8 +70,8 @@ export function exportProjectJson(p: Project) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-/** Parse and minimally validate an exported project file. */
-export async function readProjectFile(file: File): Promise<Project> {
+/** Parse and minimally validate an exported project file; restores embedded product models. */
+export async function readProjectFile(file: File): Promise<{ project: Project; products: Product[] }> {
   const data = JSON.parse(await file.text())
   const p = data?.project ?? data
   if (!p || !Array.isArray(p.variants) || !p.variants.length) throw new Error('This file is not a Home Designer project.')
@@ -65,7 +80,18 @@ export async function readProjectFile(file: File): Promise<Project> {
     if (!d || !Array.isArray(d.walls) || !Array.isArray(d.items) || !Array.isArray(d.rooms) || !Array.isArray(d.openings) || !d.style)
       throw new Error('The project file is missing design data.')
   }
-  return {
+  const products: Product[] = []
+  for (const raw of Array.isArray(data?.products) ? data.products : []) {
+    if (!raw || typeof raw.id !== 'string' || typeof raw.name !== 'string' || !(raw.w > 0 && raw.d > 0 && raw.h > 0)) continue
+    const { modelData, ...product } = raw as Product & { modelData?: string }
+    if (product.model && typeof modelData === 'string' && modelData.startsWith('data:')) {
+      await putBlob(product.model.key, await dataUrlToBlob(modelData))
+    } else if (product.model && !(await getBlob(product.model.key).catch(() => undefined))) {
+      delete product.model
+    }
+    products.push(product)
+  }
+  const project: Project = {
     id: String(p.id ?? ''),
     name: String(p.name ?? 'Imported design'),
     createdAt: Number(p.createdAt) || Date.now(),
@@ -73,4 +99,5 @@ export async function readProjectFile(file: File): Promise<Project> {
     variants: p.variants,
     activeVariantId: p.variants.some((v: { id: string }) => v.id === p.activeVariantId) ? p.activeVariantId : p.variants[0].id,
   }
+  return { project, products }
 }

@@ -24,6 +24,8 @@ export function roleColor(entry: CatalogEntry, style: StyleSettings): string {
       return style.accent
     case 'white':
       return CABINET_WHITE
+    case 'custom':
+      return entry.color ?? '#cccccc'
     default:
       return '#ffffff'
   }

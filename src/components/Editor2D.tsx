@@ -47,6 +47,35 @@ type Drag =
 
 const deg = (r: number) => (r * 180) / Math.PI
 
+/**
+ * Where a wall-mounted item dropped near p should go: flat against the closest wall (within 1.5 m),
+ * kept inside the wall's length and facing into the room on the side the cursor is on.
+ */
+function wallSnap(design: Design, p: Pt, catalogId: string): { x: number; y: number; rotation: number } | null {
+  const e = getEntry(catalogId)
+  if (e.mount !== 'wall') return null
+  const hit = nearestWall(p, design.walls, 1.5)
+  if (!hit) return null
+  const w = hit.wall
+  const len = wallLength(w)
+  const ang = wallAngle(w)
+  const cos = Math.cos(ang)
+  const sin = Math.sin(ang)
+  const half = Math.min(e.w / 2, len / 2)
+  const t = Math.max(half, Math.min(len - half, hit.t * len))
+  const base = { x: w.a.x + cos * t, y: w.a.y + sin * t }
+  let nx = -sin
+  let ny = cos
+  if ((p.x - base.x) * nx + (p.y - base.y) * ny < 0) {
+    nx = -nx
+    ny = -ny
+  }
+  const off = w.thickness / 2 + e.d / 2 + 0.003
+  // The item's back points along (sin r, -cos r); make it point at the wall (-n).
+  const rotation = ((((Math.atan2(-nx, ny) * 180) / Math.PI) % 360) + 360) % 360
+  return { x: base.x + nx * off, y: base.y + ny * off, rotation: Math.round(rotation * 100) / 100 }
+}
+
 /** Height a tabletop item dropped at p should sit at: the highest surface under it, or the floor. */
 function elevationAt(design: Design, p: Pt, catalogId: string, ignoreId?: string): number | undefined {
   if (!getEntry(catalogId).tabletop) return undefined
@@ -186,9 +215,11 @@ export function Editor2D() {
 
   const placeItemAt = (catalogId: string, p: Pt) => {
     const id = uid()
-    const at = snapPt(p, grid ? 0.05 : 0)
-    const elevation = elevationAt(design, at, catalogId)
-    updateDesign((d) => ({ ...d, items: [...d.items, { id, catalogId, x: at.x, y: at.y, rotation: 0, elevation }] }))
+    const snapped = snapPt(p, grid ? 0.05 : 0)
+    const onWall = wallSnap(design, p, catalogId)
+    const at = onWall ?? { ...snapped, rotation: 0 }
+    const elevation = elevationAt(design, at, catalogId) ?? getEntry(catalogId).defaultElevation
+    updateDesign((d) => ({ ...d, items: [...d.items, { id, catalogId, x: at.x, y: at.y, rotation: at.rotation, elevation }] }))
     select({ kind: 'item', id })
   }
 
@@ -270,7 +301,12 @@ export function Editor2D() {
         updateDesign(
           (d) => ({
             ...d,
-            items: d.items.map((it) => (it.id === dr.id ? { ...it, x, y, elevation: getEntry(it.catalogId).tabletop ? elevationAt(d, { x, y }, it.catalogId, it.id) : it.elevation } : it)),
+            items: d.items.map((it) => {
+              if (it.id !== dr.id) return it
+              const onWall = wallSnap(d, { x: p.x - dr.dx, y: p.y - dr.dy }, it.catalogId)
+              if (onWall) return { ...it, ...onWall }
+              return { ...it, x, y, elevation: getEntry(it.catalogId).tabletop ? elevationAt(d, { x, y }, it.catalogId, it.id) : it.elevation }
+            }),
           }),
           { record: false },
         )
@@ -636,7 +672,7 @@ export function Editor2D() {
 
           {/* Placement ghost */}
           {tool === 'place' && placeCatalogId && cursor && (
-            <g transform={`translate(${snap(cursor.x, grid ? 0.05 : 0)} ${snap(cursor.y, grid ? 0.05 : 0)})`} opacity={0.6} pointerEvents="none">
+            <g transform={ghostTransform(design, cursor, placeCatalogId, grid)} opacity={0.6} pointerEvents="none">
               <PlanSymbol e={getEntry(placeCatalogId)} color={itemColor({ id: '', catalogId: placeCatalogId, x: 0, y: 0, rotation: 0 }, getEntry(placeCatalogId), design.style)} />
             </g>
           )}
@@ -657,6 +693,12 @@ export function Editor2D() {
       </div>
     </div>
   )
+}
+
+function ghostTransform(design: Design, cursor: Pt, catalogId: string, grid: number): string {
+  const onWall = wallSnap(design, cursor, catalogId)
+  if (onWall) return `translate(${onWall.x} ${onWall.y}) rotate(${onWall.rotation})`
+  return `translate(${snap(cursor.x, grid ? 0.05 : 0)} ${snap(cursor.y, grid ? 0.05 : 0)})`
 }
 
 /** Draw order in the plan: rugs at the bottom, raised items (lamps on tables) on top. */

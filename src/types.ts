@@ -101,3 +101,27 @@ export type Selection =
   | null
 
 export type ViewMode = '2d' | '3d' | 'split' | 'compare'
+
+/** A real piece of furniture from a shop, added by the user with its real dimensions. */
+export interface Product {
+  id: string
+  name: string
+  store: string
+  url?: string
+  price?: number
+  currency: string
+  /** Real dimensions in meters. */
+  w: number
+  d: number
+  h: number
+  /** Built-in generator used to draw it when there is no 3D model (see PRODUCT_SHAPES). */
+  shape: string
+  color: string
+  /** Show wood grain on the main color (otherwise a plain painted/fabric finish). */
+  woodFinish?: boolean
+  /** Small JPEG data URL of the product photo. */
+  photo?: string
+  /** Uploaded 3D model, stored in IndexedDB. */
+  model?: { key: string; fileName: string; format: 'glb' | 'gltf' | 'obj' | 'fbx'; upAxis: 'y' | 'z'; rotation: number }
+  createdAt: number
+}

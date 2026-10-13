@@ -141,6 +141,16 @@ export function PlanSymbol({ e, color, stroke = '#3b3f45' }: { e: CatalogEntry; 
         </g>
       )
     case 'lamp':
+      if (e.id === 'arcLamp' || e.builder === 'arcLamp') {
+        // Base on one end, shade hanging over the other.
+        return (
+          <g {...common}>
+            <rect x={x0 + 0.02} y={-0.15} width={0.3} height={0.3} fill={fill} />
+            <line x1={x0 + 0.17} y1={0} x2={-x0 - 0.18} y2={0} strokeDasharray="4 3" />
+            <circle cx={-x0 - 0.18} r={0.2} fill="#fdf3dc" />
+          </g>
+        )
+      }
       return (
         <g {...common}>
           <circle r={w / 2} fill="#fdf3dc" />
@@ -161,6 +171,42 @@ export function PlanSymbol({ e, color, stroke = '#3b3f45' }: { e: CatalogEntry; 
           <rect x={-Math.min(1.45, w - 0.2) / 2} y={y0 + 0.12} width={Math.min(1.45, w - 0.2)} height={0.05} fill="#1d1e20" />
         </g>
       )
+    case 'panel': {
+      // Wall pieces are thin from above; draw slats for slat panels, a solid strip otherwise.
+      const slats = e.id === 'slatPanel' || e.id === 'slatWall' || e.builder === 'slatPanel'
+      const n = slats ? Math.floor(w / 0.045) : 0
+      return (
+        <g {...common}>
+          <rect x={x0} y={y0} width={w} height={Math.max(d, 0.03)} fill={fill} />
+          {Array.from({ length: n }, (_, i) => (
+            <line key={i} x1={x0 + 0.0225 + i * 0.045} y1={y0} x2={x0 + 0.0225 + i * 0.045} y2={y0 + Math.max(d, 0.03)} opacity={0.6} />
+          ))}
+        </g>
+      )
+    }
+    case 'pendant':
+      return w / d > 2 ? (
+        <g {...common}>
+          <rect x={x0} y={y0} width={w} height={d} fill="#fdf3dc" strokeDasharray="4 3" />
+        </g>
+      ) : (
+        <g {...common}>
+          <circle r={w / 2} fill="#fdf3dc" fillOpacity={0.6} strokeDasharray="4 3" />
+          <line x1={-w / 4} y1={0} x2={w / 4} y2={0} />
+          <line x1={0} y1={-w / 4} x2={0} y2={w / 4} />
+        </g>
+      )
+    case 'curtain': {
+      const waves = Math.max(4, Math.round(w / 0.12))
+      const amp = d / 3
+      const pts = Array.from({ length: waves * 4 + 1 }, (_, i) => `${x0 + (i / (waves * 4)) * w},${Math.sin((i / 4) * Math.PI) * amp}`)
+      return (
+        <g {...common}>
+          <line x1={x0} y1={y0} x2={-x0} y2={y0} />
+          <polyline points={pts.join(' ')} fill="none" />
+        </g>
+      )
+    }
     default:
       return (
         <g {...common}>

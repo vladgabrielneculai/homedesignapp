@@ -3,7 +3,7 @@ import { getFloor, type FloorMaterial } from '../catalog/styles'
 import { mix } from '../lib/colors'
 import type { FloorId } from '../types'
 
-const SIZE = 512
+const SIZE = 1024
 const cache = new Map<FloorId, THREE.CanvasTexture>()
 const patternCache = new Map<FloorId, string>()
 
@@ -174,4 +174,127 @@ export function floorPatternUrl(id: FloorId): string {
     patternCache.set(id, url)
   }
   return url
+}
+
+let woodTex: THREE.CanvasTexture | null = null
+let fabricTex: THREE.CanvasTexture | null = null
+let boucleTex: THREE.CanvasTexture | null = null
+
+/** Light grayscale wood grain; multiplied with the material color so any wood tone works. */
+export function woodGrainTexture(): THREE.CanvasTexture {
+  if (woodTex) return woodTex
+  const c = document.createElement('canvas')
+  c.width = c.height = 512
+  const ctx = c.getContext('2d')!
+  const rand = rng(4242)
+  ctx.fillStyle = '#ededed'
+  ctx.fillRect(0, 0, 512, 512)
+  for (let i = 0; i < 140; i++) {
+    const y = rand() * 512
+    const shade = 200 + Math.round(rand() * 45)
+    ctx.strokeStyle = `rgb(${shade},${shade},${shade})`
+    ctx.globalAlpha = 0.25 + rand() * 0.5
+    ctx.lineWidth = 0.6 + rand() * 2.4
+    ctx.beginPath()
+    ctx.moveTo(0, y)
+    for (let x = 0; x <= 512; x += 32) ctx.lineTo(x, y + Math.sin(x / 70 + i) * (2 + rand() * 4))
+    ctx.stroke()
+  }
+  // a few knots
+  for (let k = 0; k < 3; k++) {
+    ctx.globalAlpha = 0.25
+    ctx.strokeStyle = '#b9b9b9'
+    const x = rand() * 512
+    const y = rand() * 512
+    for (let r = 3; r < 18; r += 3) {
+      ctx.beginPath()
+      ctx.ellipse(x, y, r * 2.2, r * 0.7, 0, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+  }
+  ctx.globalAlpha = 1
+  woodTex = new THREE.CanvasTexture(c)
+  woodTex.wrapS = woodTex.wrapT = THREE.RepeatWrapping
+  woodTex.colorSpace = THREE.SRGBColorSpace
+  woodTex.anisotropy = 8
+  return woodTex
+}
+
+function noiseTexture(seed: number, size: number, dots: number, dotSize: number): THREE.CanvasTexture {
+  const c = document.createElement('canvas')
+  c.width = c.height = size
+  const ctx = c.getContext('2d')!
+  const rand = rng(seed)
+  ctx.fillStyle = '#808080'
+  ctx.fillRect(0, 0, size, size)
+  for (let i = 0; i < dots; i++) {
+    const v = Math.round(rand() * 255)
+    ctx.fillStyle = `rgb(${v},${v},${v})`
+    const r = dotSize * (0.5 + rand())
+    ctx.beginPath()
+    ctx.arc(rand() * size, rand() * size, r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  return t
+}
+
+/** Fine woven-fabric bump map for upholstery. */
+export function fabricBumpTexture(): THREE.CanvasTexture {
+  if (!fabricTex) {
+    const c = document.createElement('canvas')
+    c.width = c.height = 128
+    const ctx = c.getContext('2d')!
+    for (let y = 0; y < 128; y++)
+      for (let x = 0; x < 128; x++) {
+        const v = 128 + 50 * Math.sin(x * 1.6) * Math.sin(y * 1.6) + ((x * 7 + y * 13) % 17) * 3
+        ctx.fillStyle = `rgb(${v},${v},${v})`
+        ctx.fillRect(x, y, 1, 1)
+      }
+    fabricTex = new THREE.CanvasTexture(c)
+    fabricTex.wrapS = fabricTex.wrapT = THREE.RepeatWrapping
+    fabricTex.repeat.set(6, 6)
+  }
+  return fabricTex
+}
+
+/** Coarse looped texture for bouclé upholstery. */
+export function boucleBumpTexture(): THREE.CanvasTexture {
+  if (!boucleTex) {
+    boucleTex = noiseTexture(77, 256, 2600, 2.6)
+    boucleTex.repeat.set(3, 3)
+  }
+  return boucleTex
+}
+
+const artCache = new Map<string, THREE.CanvasTexture>()
+
+/** Simple abstract print for framed wall art, colored from the style palette. */
+export function artTexture(a: string, b: string, c: string): THREE.CanvasTexture {
+  const key = a + b + c
+  let t = artCache.get(key)
+  if (!t) {
+    const cv = document.createElement('canvas')
+    cv.width = 256
+    cv.height = 360
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = '#f3efe8'
+    ctx.fillRect(0, 0, 256, 360)
+    ctx.fillStyle = a
+    ctx.beginPath()
+    ctx.arc(150, 130, 70, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = b
+    ctx.fillRect(40, 190, 140, 120)
+    ctx.strokeStyle = c
+    ctx.lineWidth = 10
+    ctx.beginPath()
+    ctx.arc(110, 250, 90, Math.PI * 1.1, Math.PI * 1.9)
+    ctx.stroke()
+    t = new THREE.CanvasTexture(cv)
+    t.colorSpace = THREE.SRGBColorSpace
+    artCache.set(key, t)
+  }
+  return t
 }

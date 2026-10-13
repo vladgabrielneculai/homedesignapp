@@ -1,10 +1,13 @@
+import { useState } from 'react'
 import { getEntry } from '../catalog/catalog'
+import { formatPrice, productCatalogId } from '../catalog/products'
 import { FLOORS, PAINT_SWATCHES } from '../catalog/styles'
 import { roleColor } from '../lib/colors'
 import { clampOpening, polygonArea, uid, wallAngle, wallLength } from '../lib/geometry'
 import { useDesign, useStore } from '../state/store'
 import { floorPatternUrl } from '../three/textures'
 import type { Design, FloorId } from '../types'
+import { ProductDialog } from './ProductDialog'
 
 function NumberField({ label, value, step = 0.01, min, max, unit = 'm', onChange }: { label: string; value: number; step?: number; min?: number; max?: number; unit?: string; onChange: (v: number) => void }) {
   return (
@@ -138,7 +141,10 @@ function Summary({ design }: { design: Design }) {
 function ItemProps({ id, design }: { id: string; design: Design }) {
   const item = design.items.find((i) => i.id === id)
   const { updateDesign, checkpoint } = useStore.getState()
+  const products = useStore((s) => s.products)
+  const [editingProduct, setEditingProduct] = useState(false)
   if (!item) return null
+  const product = products.find((p) => productCatalogId(p) === item.catalogId)
   const entry = getEntry(item.catalogId)
   const set = (patch: Partial<typeof item>, record = true) => updateDesign((d) => ({ ...d, items: d.items.map((i) => (i.id === id ? { ...i, ...patch } : i)) }), { record })
   const color = item.color ?? roleColor(entry, design.style)
@@ -206,6 +212,24 @@ function ItemProps({ id, design }: { id: string; design: Design }) {
           </div>
         </>
       )}
+      {entry.product && (
+        <div className="product-box">
+          {entry.product.photo && <img src={entry.product.photo} alt="" />}
+          <div>
+            <strong>{entry.product.store}</strong>
+            {entry.product.price !== undefined && <span>{formatPrice(entry.product.price, entry.product.currency)}</span>}
+            {entry.product.url && (
+              <a href={entry.product.url} target="_blank" rel="noreferrer noopener">
+                View in store ↗
+              </a>
+            )}
+            <button className="link small" onClick={() => setEditingProduct(true)}>
+              Edit product
+            </button>
+          </div>
+        </div>
+      )}
+      {editingProduct && product && <ProductDialog product={product} onClose={() => setEditingProduct(false)} />}
       {entry.model && (
         <p className="muted small credit">
           3D model: {entry.model.credit}, {entry.model.license}.{' '}

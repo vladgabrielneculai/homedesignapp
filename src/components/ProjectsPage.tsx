@@ -8,7 +8,7 @@ export function ProjectsPage() {
   const projects = useStore((s) => s.projects)
   const { createProject, openProject, deleteProject, duplicateProject, renameProject, importProject } = useStore.getState()
   const [name, setName] = useState('')
-  const [templateId, setTemplateId] = useState('apartment')
+  const [templateId, setTemplateId] = useState('modern')
   const [error, setError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -39,7 +39,9 @@ export function ProjectsPage() {
               if (!f) return
               try {
                 setError(null)
-                const id = importProject(await readProjectFile(f))
+                const { project, products } = await readProjectFile(f)
+                useStore.getState().importProducts(products)
+                const id = importProject(project)
                 openProject(id)
               } catch (err) {
                 setError(err instanceof Error ? err.message : 'Could not import that file.')
@@ -111,7 +113,7 @@ export function ProjectsPage() {
                 <button className="btn small" onClick={() => duplicateProject(p.id)}>
                   Duplicate
                 </button>
-                <button className="btn small" onClick={() => exportProjectJson(p)}>
+                <button className="btn small" onClick={() => exportProjectJson(p, useStore.getState().products)}>
                   Export
                 </button>
                 <button

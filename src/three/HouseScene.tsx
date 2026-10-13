@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useLayoutEffect, useMemo } from 'react'
+import { Suspense, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { useGLTF } from '@react-three/drei'
@@ -8,32 +8,53 @@ import { getFloor } from '../catalog/styles'
 import { itemColor, mix, paletteFor } from '../lib/colors'
 import { wallAngle, wallLength } from '../lib/geometry'
 import type { Design, Item, Opening, Room, Wall } from '../types'
+import { useStore } from '../state/store'
 import { ProceduralItem, type Palette } from './Procedural'
 import { floorTexture } from './textures'
+import { fitObject, loadUserModel } from './userModels'
 
 export interface SceneOptions {
   lowWalls: boolean
+  evening?: boolean
   selectedItemId?: string | null
   onSelectItem?: (id: string | null) => void
 }
 
 const LOW_WALL_HEIGHT = 1.0
+const SKIRTING_H = 0.08
 
 /** Image-based lighting generated locally so glTF materials (sheen, transmission) look right offline. */
-export function LocalEnvironment() {
-  const { gl, scene } = useThree()
+export function LocalEnvironment({ intensity = 0.3 }: { intensity?: number }) {
+  const { gl, scene, invalidate } = useThree()
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl)
     const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
     scene.environment = env
-    scene.environmentIntensity = 0.3
     return () => {
       scene.environment = null
       env.dispose()
       pmrem.dispose()
     }
   }, [gl, scene])
+  useEffect(() => {
+    scene.environmentIntensity = intensity
+    invalidate()
+  }, [scene, intensity, invalidate])
   return null
+}
+
+/** Warm "ceiling lights" in every room for Evening mode. */
+export function RoomLights({ design }: { design: Design }) {
+  return (
+    <>
+      {design.rooms.map((r) => {
+        const n = r.points.length || 1
+        const cx = r.points.reduce((s, p) => s + p.x, 0) / n
+        const cz = r.points.reduce((s, p) => s + p.y, 0) / n
+        return <pointLight key={r.id} position={[cx, 2.45, cz]} intensity={1.6} distance={7} decay={1.5} color="#ffd6a3" />
+      })}
+    </>
+  )
 }
 
 function WallMesh({ wall, openings, color, lowWalls }: { wall: Wall; openings: Opening[]; color: string; lowWalls: boolean }) {
@@ -72,6 +93,17 @@ function WallMesh({ wall, openings, color, lowWalls }: { wall: Wall; openings: O
           </mesh>
         )
       })}
+      {/* skirting boards on both faces of every full-height piece */}
+      {pieces
+        .filter((p) => p.y0 === 0 && p.y1 > SKIRTING_H)
+        .map((p, i) =>
+          [-1, 1].map((side) => (
+            <mesh key={`${i}${side}`} position={[(p.x0 + p.x1) / 2 - len / 2, SKIRTING_H / 2, side * (T / 2 + 0.006)]} receiveShadow>
+              <boxGeometry args={[p.x1 - p.x0, SKIRTING_H, 0.012]} />
+              <meshStandardMaterial color="#f7f6f2" roughness={0.45} />
+            </mesh>
+          )),
+        )}
       {/* darker cap on top of the wall makes the cut readable from above */}
       <mesh position={[0, H + 0.002, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[len + T, T]} />
@@ -176,31 +208,30 @@ function RoomFloor({ room, fallback }: { room: Room; fallback: Design['style']['
 
 function ModelItem({ entry }: { entry: CatalogEntry }) {
   const { scene } = useGLTF(import.meta.env.BASE_URL + entry.model!.url)
-  const object = useMemo(() => {
-    const clone = scene.clone(true)
-    // Some sample models ship with their own studio lights (the room provides lighting instead)
-    // or extra demo objects listed in `hide`.
-    const remove: THREE.Object3D[] = []
-    const hide = entry.model!.hide ?? []
-    clone.traverse((o) => {
-      if ((o as THREE.Light).isLight || hide.includes(o.name)) remove.push(o)
-      if ((o as THREE.Mesh).isMesh) {
-        o.castShadow = true
-        o.receiveShadow = true
-      }
-    })
-    for (const o of remove) o.removeFromParent()
-    clone.updateMatrixWorld(true)
-    const box = new THREE.Box3().setFromObject(clone)
-    const size = box.getSize(new THREE.Vector3())
-    const s = Math.min(entry.w / size.x, entry.d / size.z, entry.h / size.y)
-    clone.scale.setScalar(s)
-    const center = box.getCenter(new THREE.Vector3())
-    clone.position.set(-center.x * s, -box.min.y * s, -center.z * s)
-    const wrapper = new THREE.Group()
-    wrapper.add(clone)
-    return wrapper
-  }, [scene, entry])
+  const object = useMemo(() => fitObject(scene, entry, { hide: entry.model!.hide }), [scene, entry])
+  return <primitive object={object} />
+}
+
+/** A 3D model the user uploaded for one of their shop products (loaded from IndexedDB). */
+function UserModelItem({ entry, fallback }: { entry: CatalogEntry; fallback: React.ReactNode }) {
+  const ref = entry.userModel!
+  const [source, setSource] = useState<{ key: string; obj: THREE.Object3D } | null>(null)
+  const [failed, setFailed] = useState<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    loadUserModel(ref).then(
+      (obj) => alive && setSource({ key: ref.key, obj }),
+      () => alive && setFailed(ref.key),
+    )
+    return () => {
+      alive = false
+    }
+  }, [ref])
+  const object = useMemo(
+    () => (source && source.key === ref.key ? fitObject(source.obj, entry, { upAxis: ref.upAxis, rotation: ref.rotation }) : null),
+    [source, entry, ref],
+  )
+  if (!object || failed === ref.key) return <>{fallback}</>
   return <primitive object={object} />
 }
 
@@ -213,7 +244,7 @@ function Placeholder({ entry }: { entry: CatalogEntry }) {
   )
 }
 
-function ItemMesh({ item, style, palette, selected, onSelect }: { item: Item; style: Design['style']; palette: Palette; selected: boolean; onSelect?: (id: string) => void }) {
+function ItemMesh({ item, style, palette, selected, evening, onSelect }: { item: Item; style: Design['style']; palette: Palette; selected: boolean; evening: boolean; onSelect?: (id: string) => void }) {
   const entry = getEntry(item.catalogId)
   const color = itemColor(item, entry, style)
   const handleClick = onSelect
@@ -228,8 +259,11 @@ function ItemMesh({ item, style, palette, selected, onSelect }: { item: Item; st
         <Suspense fallback={<Placeholder entry={entry} />}>
           <ModelItem entry={entry} />
         </Suspense>
+      ) : entry.userModel ? (
+        // Until the uploaded model loads (or if it is missing), show the product's chosen shape.
+        <UserModelItem entry={entry} fallback={<ProceduralItem e={entry} pal={palette} mainColor={color} evening={evening} elevation={item.elevation ?? 0} />} />
       ) : (
-        <ProceduralItem e={entry} pal={palette} mainColor={color} />
+        <ProceduralItem e={entry} pal={palette} mainColor={color} evening={evening} elevation={item.elevation ?? 0} />
       )}
       {selected && <SelectionBox entry={entry} />}
     </group>
@@ -247,6 +281,8 @@ function SelectionBox({ entry }: { entry: CatalogEntry }) {
 
 export function HouseScene({ design, options }: { design: Design; options: SceneOptions }) {
   const palette = useMemo(() => paletteFor(design.style), [design.style])
+  // Re-render when the user edits one of their shop products (size, color, model).
+  useStore((s) => s.products)
   const openingsByWall = useMemo(() => {
     const m = new Map<string, Opening[]>()
     for (const o of design.openings) m.set(o.wallId, [...(m.get(o.wallId) ?? []), o])
@@ -268,6 +304,7 @@ export function HouseScene({ design, options }: { design: Design; options: Scene
           style={design.style}
           palette={palette}
           selected={options.selectedItemId === it.id}
+          evening={!!options.evening}
           onSelect={options.onSelectItem}
         />
       ))}
@@ -276,13 +313,17 @@ export function HouseScene({ design, options }: { design: Design; options: Scene
 }
 
 /** Fits the shadow camera of a directional light around the design. */
-export function SunLight({ center, radius }: { center: THREE.Vector3; radius: number }) {
+export function SunLight({ center, radius, intensity = 2.4, color = '#fff4e0' }: { center: THREE.Vector3; radius: number; intensity?: number; color?: string }) {
   const light = useMemo(() => {
     const l = new THREE.DirectionalLight('#fff4e0', 2.4)
     l.castShadow = true
     l.shadow.mapSize.set(2048, 2048)
     return l
   }, [])
+  useLayoutEffect(() => {
+    light.intensity = intensity
+    light.color.set(color)
+  }, [light, intensity, color])
   useLayoutEffect(() => {
     // Sun from the back-left so shadows fall towards the default camera instead of hiding behind objects.
     light.position.set(center.x - radius * 0.9, radius * 1.1 + 5, center.z - radius * 0.5)

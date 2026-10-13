@@ -2,7 +2,9 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { TEMPLATES } from '../catalog/templates'
 import { uid } from '../lib/geometry'
-import type { Design, Project, Selection, Tool, Variant, ViewMode } from '../types'
+import { productCatalogId, syncProducts } from '../catalog/products'
+import { deleteBlob } from '../lib/blobStore'
+import type { Design, Product, Project, Selection, Tool, Variant, ViewMode } from '../types'
 
 const HISTORY_LIMIT = 80
 
@@ -14,6 +16,7 @@ interface History {
 interface State {
   // Persisted
   projects: Project[]
+  products: Product[]
   currentProjectId: string | null
   snap: boolean
 
@@ -33,6 +36,11 @@ interface State {
   duplicateProject: (id: string) => void
   importProject: (p: Project) => string
   setThumbnail: (id: string, dataUrl: string) => void
+
+  // Shop products
+  saveProduct: (p: Product) => void
+  deleteProduct: (id: string) => void
+  importProducts: (list: Product[]) => void
 
   // Variants
   addVariant: (name: string, copyCurrent: boolean) => void
@@ -149,6 +157,7 @@ export const useStore = create<State>()(
   persist(
     (set, get) => ({
       projects: [],
+      products: [],
       currentProjectId: null,
       snap: true,
 
@@ -211,6 +220,35 @@ export const useStore = create<State>()(
 
       setThumbnail: (id, dataUrl) =>
         set((s) => ({ projects: s.projects.map((p) => (p.id === id ? { ...p, thumbnail: dataUrl } : p)) })),
+
+      saveProduct: (p) =>
+        set((s) => ({
+          products: s.products.some((x) => x.id === p.id) ? s.products.map((x) => (x.id === p.id ? p : x)) : [p, ...s.products],
+          // Edits change how existing items render; bump updatedAt so thumbnails refresh.
+          projects: s.projects.map((pr) => (pr.id === s.currentProjectId ? { ...pr, updatedAt: Date.now() } : pr)),
+        })),
+
+      deleteProduct: (id) =>
+        set((s) => {
+          const product = s.products.find((p) => p.id === id)
+          if (product?.model) deleteBlob(product.model.key).catch(() => {})
+          const cid = productCatalogId({ id })
+          return {
+            products: s.products.filter((p) => p.id !== id),
+            // Remove placed copies everywhere so no design points at a missing product.
+            projects: s.projects.map((pr) => ({
+              ...pr,
+              variants: pr.variants.map((v) => ({ ...v, design: { ...v.design, items: v.design.items.filter((i) => i.catalogId !== cid) } })),
+            })),
+            selection: null,
+          }
+        }),
+
+      importProducts: (list) =>
+        set((s) => {
+          const known = new Set(s.products.map((p) => p.id))
+          return { products: [...list.filter((p) => !known.has(p.id)), ...s.products] }
+        }),
 
       addVariant: (name, copyCurrent) =>
         set((s) => {
@@ -303,10 +341,16 @@ export const useStore = create<State>()(
     {
       name: 'home-designer-v1',
       storage: createJSONStorage(() => safeStorage),
-      partialize: (s) => ({ projects: s.projects, currentProjectId: s.currentProjectId, snap: s.snap }),
+      partialize: (s) => ({ projects: s.projects, products: s.products, currentProjectId: s.currentProjectId, snap: s.snap }),
     },
   ),
 )
+
+// Keep the catalog's registry of user products in sync with the store.
+syncProducts(useStore.getState().products)
+useStore.subscribe((s, prev) => {
+  if (s.products !== prev.products) syncProducts(s.products)
+})
 
 export function useDesign(): Design | undefined {
   return useStore((s) => activeVariant(currentProject(s))?.design)

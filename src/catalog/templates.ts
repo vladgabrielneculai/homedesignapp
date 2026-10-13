@@ -368,6 +368,70 @@ function house(): Design {
   return p.build(stripPreset(STYLE_PRESETS[1]))
 }
 
+function modernLoft(): Design {
+  const p = new Plan()
+  const [top, , bottom] = p.outline([
+    [0, 0],
+    [9, 0],
+    [9, 6.5],
+    [0, 6.5],
+  ])
+  p.open(top, 'window', 1.5, 1.6, { height: 1.6, sill: 0.6 })
+  p.open(top, 'window', 4.0, 1.6, { height: 1.6, sill: 0.6 })
+  p.open(top, 'window', 7.5, 1.4)
+  p.open(bottom, 'door', 4.5, 1.0)
+  const spine = p.wall([6, 0], [6, 6.5])
+  p.open(spine, 'door', 4.6, 0.85)
+  p.room('Living & dining', [
+    [0, 0],
+    [6, 0],
+    [6, 6.5],
+    [0, 6.5],
+  ])
+  p.room('Bedroom', [
+    [6, 0],
+    [9, 0],
+    [9, 6.5],
+    [6, 6.5],
+  ])
+
+  // Slat feature wall with a floating media unit
+  p.item('slatWall', 0.111, 2.0, 270)
+  p.item('mediaWall', 0.312, 2.0, 270)
+  p.item('rugRect', 2.25, 2.0, 90)
+  p.item('roundCoffee', 1.95, 2.0, 0)
+  p.item('cloudSofa', 3.35, 2.0, 90)
+  p.item('boucleChair', 1.6, 3.75, 160)
+  p.item('sideTable', 2.35, 3.95, 0)
+  p.item('arcLamp', 3.82, 0.55, 180)
+  p.item('wallArt', 5.925, 2.0, 90, 0.95)
+  p.item('monstera', 5.45, 0.6, 0)
+  p.item('curtains', 1.5, 0.17, 0)
+  p.item('curtains', 4.0, 0.17, 0)
+  // Dining
+  p.item('marbleTable', 4.4, 4.75, 0)
+  p.item('diningChair', 4.4, 3.95, 0)
+  p.item('diningChair', 4.4, 5.55, 180)
+  p.item('diningChair', 3.6, 4.75, 270)
+  p.item('diningChair', 5.2, 4.75, 90)
+  p.item('globePendant', 4.4, 4.75, 0, 1.75)
+  // Kitchen
+  p.item('kitchenRun', 1.6, 6.09, 180)
+  p.item('floatingShelf', 3.4, 6.29, 180, 1.4)
+  // Bedroom
+  p.item('slatWall', 8.889, 2.2, 90)
+  p.item('platformBed', 7.79, 2.2, 90)
+  p.item('nightstand', 8.68, 0.95, 90)
+  p.item('nightstand', 8.68, 3.45, 90)
+  p.item('globePendant', 8.68, 0.95, 0, 1.15)
+  p.item('globePendant', 8.68, 3.45, 0, 1.15)
+  p.item('rugRect', 7.5, 2.2, 90)
+  p.item('slidingWardrobe', 7.6, 6.075, 180)
+  p.item('roundMirror', 6.075, 2.2, 270, 1.0)
+  p.item('curtains', 7.5, 0.17, 0)
+  return p.build(stripPreset(STYLE_PRESETS[5]))
+}
+
 export interface Template {
   id: string
   name: string
@@ -378,6 +442,7 @@ export interface Template {
 export const TEMPLATES: Template[] = [
   { id: 'blank', name: 'Blank canvas', description: 'Start from nothing and draw your own walls.', create: blank },
   { id: 'room', name: 'Single room', description: 'A 5 × 4 m room with a door and two windows.', create: emptyRoom },
+  { id: 'modern', name: 'Modern loft', description: '58 m² open living with slat feature walls and a bedroom.', create: modernLoft },
   { id: 'studio', name: 'Studio apartment', description: '38 m² open studio with a separate bathroom.', create: studio },
   { id: 'apartment', name: 'Two-bedroom apartment', description: '80 m² with open kitchen, two bedrooms and bath.', create: apartment },
   { id: 'house', name: 'Family house – ground floor', description: '108 m² open-plan living, study and guest bath.', create: house },

@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react'
 import { CATALOG, CATEGORIES, type Category, type CatalogEntry } from '../catalog/catalog'
+import { formatPrice, productEntry } from '../catalog/products'
 import { FLOORS, PAINT_SWATCHES, STYLE_PRESETS, stripPreset } from '../catalog/styles'
 import { itemColor, mix } from '../lib/colors'
 import { useDesign, useStore } from '../state/store'
 import { floorPatternUrl } from '../three/textures'
-import type { StyleSettings, Tool } from '../types'
+import type { Product, StyleSettings, Tool } from '../types'
 import { PlanSymbol } from './PlanSymbol'
+import { ProductDialog } from './ProductDialog'
 
 type Tab = 'build' | 'furnish' | 'style'
 
@@ -87,49 +89,94 @@ function CatalogThumb({ e, style }: { e: CatalogEntry; style: StyleSettings }) {
 function FurnishPanel() {
   const design = useDesign()
   const placing = useStore((s) => s.placeCatalogId)
+  const products = useStore((s) => s.products)
   const { startPlacing } = useStore.getState()
   const [query, setQuery] = useState('')
   const [cat, setCat] = useState<Category | 'All'>('All')
+  const [editing, setEditing] = useState<Product | 'new' | null>(null)
   const list = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return CATALOG.filter((c) => (cat === 'All' || c.category === cat) && (!q || c.name.toLowerCase().includes(q) || c.category.toLowerCase().includes(q)))
-  }, [query, cat])
+    const all = [...products.map(productEntry), ...CATALOG]
+    return all.filter(
+      (c) =>
+        (cat === 'All' || c.category === cat) &&
+        (!q || c.name.toLowerCase().includes(q) || c.category.toLowerCase().includes(q) || c.product?.store.toLowerCase().includes(q)),
+    )
+  }, [query, cat, products])
   if (!design) return null
+  const showProducts = cat === 'All' || cat === 'My products'
 
   return (
     <div className="panel">
-      <input className="input" type="search" placeholder="Search furniture…" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <input className="input" type="search" placeholder="Search furniture or stores…" value={query} onChange={(e) => setQuery(e.target.value)} />
       <div className="chips">
         {(['All', ...CATEGORIES] as const).map((c) => (
           <button key={c} className={'chip' + (cat === c ? ' active' : '')} onClick={() => setCat(c)}>
             {c}
+            {c === 'My products' && products.length > 0 && <span className="chip-count">{products.length}</span>}
           </button>
         ))}
       </div>
-      <p className="muted small">Click an item and then click the plan to place it, or drag it onto the plan.</p>
+      {showProducts && (
+        <button className="btn add-product" onClick={() => setEditing('new')}>
+          + Add a product from a shop
+        </button>
+      )}
+      {cat === 'My products' && !products.length && (
+        <div className="empty-hint">
+          <strong>Use real furniture from IKEA or any store</strong>
+          <ol>
+            <li>Open the product page and copy its name, price, link and measurements.</li>
+            <li>Pick what it looks like and its color, and add a photo if you like.</li>
+            <li>If the store offers a 3D model download (.glb, .obj, .fbx), upload it to see the real piece.</li>
+          </ol>
+          It's placed at its exact size, and the <b>Shopping list</b> adds up what your design costs.
+        </div>
+      )}
+      <p className="muted small">Click an item and then click the plan to place it, or drag it onto the plan. Wall pieces snap to the nearest wall.</p>
       <div className="catalog-grid">
         {list.map((e) => (
-          <button
-            key={e.id}
-            className={'catalog-card' + (placing === e.id ? ' active' : '')}
-            draggable
-            onDragStart={(ev) => {
-              ev.dataTransfer.setData('text/catalog-id', e.id)
-              ev.dataTransfer.effectAllowed = 'copy'
-            }}
-            onClick={() => startPlacing(e.id)}
-            title={`${e.name} — ${Math.round(e.w * 100)} × ${Math.round(e.d * 100)} × ${Math.round(e.h * 100)} cm`}
-          >
-            <CatalogThumb e={e} style={design.style} />
-            <span className="catalog-name">{e.name}</span>
-            <span className="catalog-dims">
-              {Math.round(e.w * 100)}×{Math.round(e.d * 100)} cm
-            </span>
-            {e.model && <span className="badge">3D model</span>}
-          </button>
+          <div key={e.id} className="catalog-cell">
+            <button
+              className={'catalog-card' + (placing === e.id ? ' active' : '')}
+              draggable
+              onDragStart={(ev) => {
+                ev.dataTransfer.setData('text/catalog-id', e.id)
+                ev.dataTransfer.effectAllowed = 'copy'
+              }}
+              onClick={() => startPlacing(e.id)}
+              title={`${e.name} — ${Math.round(e.w * 100)} × ${Math.round(e.d * 100)} × ${Math.round(e.h * 100)} cm`}
+            >
+              {e.product?.photo ? <img src={e.product.photo} alt="" className="catalog-photo" /> : <CatalogThumb e={e} style={design.style} />}
+              <span className="catalog-name">{e.name}</span>
+              <span className="catalog-dims">
+                {Math.round(e.w * 100)}×{Math.round(e.d * 100)} cm
+              </span>
+              {e.product && (
+                <span className="catalog-store">
+                  {e.product.store}
+                  {e.product.price !== undefined && ` · ${formatPrice(e.product.price, e.product.currency)}`}
+                </span>
+              )}
+              {e.model && <span className="badge">3D model</span>}
+              {e.userModel && <span className="badge">Your 3D</span>}
+              {!e.model && !e.userModel && e.category === 'Modern' && <span className="badge new">New</span>}
+            </button>
+            {e.product && (
+              <button
+                className="edit-product"
+                title="Edit product"
+                aria-label={`Edit ${e.name}`}
+                onClick={() => setEditing(products.find((p) => productEntry(p).id === e.id) ?? null)}
+              >
+                ✎
+              </button>
+            )}
+          </div>
         ))}
-        {!list.length && <p className="muted">Nothing matches “{query}”.</p>}
+        {!list.length && query && <p className="muted">Nothing matches “{query}”.</p>}
       </div>
+      {editing && <ProductDialog product={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
     </div>
   )
 }

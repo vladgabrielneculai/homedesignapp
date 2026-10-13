@@ -1,5 +1,8 @@
-import type { ReactNode } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import * as THREE from 'three'
+import { RoundedBox } from '@react-three/drei'
 import type { CatalogEntry } from '../catalog/catalog'
+import { artTexture, boucleBumpTexture, fabricBumpTexture, floorTexture, woodGrainTexture } from './textures'
 
 /**
  * Procedurally built furniture. Local frame: width along x, depth along z (back at -z, front at +z),
@@ -24,19 +27,68 @@ const GLASS = '#cfe3ea'
 const LEAF = '#4f7d45'
 const POT = '#b8735a'
 
+/** Rendering context for the item being built: which color counts as "wood", and the lighting mode. */
+interface ItemCtx {
+  wood: string
+  evening: boolean
+  /** Height of the item above the floor, so pendants can run their cord up to the ceiling. */
+  elevation: number
+}
+const Ctx = createContext<ItemCtx>({ wood: '', evening: false, elevation: 0 })
+
+const CEILING = 2.7
+
+/** Cord from the top of a hanging lamp up to the ceiling, with a canopy. */
+function Cord({ x = 0, top, color }: { x?: number; top: number; color: string }) {
+  const { elevation } = useContext(Ctx)
+  const len = Math.max(0.05, CEILING - elevation - top)
+  return (
+    <>
+      <Cyl p={[x, top + len / 2, 0]} rt={0.004} h={len} c="#222" r={0.5} />
+      <Cyl p={[x, top + len - 0.01, 0]} rt={0.05} h={0.02} c={color} r={0.3} m={0.6} />
+    </>
+  )
+}
+
+/**
+ * Basic building block. Upholstery (roughness ≥ 0.9) gets rounded edges and a woven bump map,
+ * parts in the item's wood color get a grain texture; everything else is a plain box.
+ */
 function Box({ p, s, c, r = 0.7, m = 0, children }: { p: V3; s: V3; c: string; r?: number; m?: number; children?: ReactNode }) {
+  const ctx = useContext(Ctx)
+  const fabric = r >= 0.9
+  const radius = fabric ? Math.min(0.035, Math.min(...s) / 2 - 0.001) : 0
+  if (fabric && radius > 0.004) {
+    return (
+      <RoundedBox args={s} radius={radius} smoothness={3} position={p} castShadow receiveShadow>
+        <meshStandardMaterial color={c} roughness={r} bumpMap={fabricBumpTexture()} bumpScale={0.6} />
+        {children}
+      </RoundedBox>
+    )
+  }
+  const wood = !fabric && m === 0 && c === ctx.wood
   return (
     <mesh position={p} castShadow receiveShadow>
       <boxGeometry args={s} />
-      <meshStandardMaterial color={c} roughness={r} metalness={m} />
+      <meshStandardMaterial color={c} roughness={wood ? 0.55 : r} metalness={m} map={wood ? woodGrainTexture() : null} />
       {children}
     </mesh>
   )
 }
 
-function Cyl({ p, rt, rb = rt, h, c, r = 0.6, m = 0, seg = 24 }: { p: V3; rt: number; rb?: number; h: number; c: string; r?: number; m?: number; seg?: number }) {
+/** Soft rounded cushion (bouclé or fabric) used by the modern pieces. */
+function Soft({ p, s, c, radius = 0.08, boucle = false }: { p: V3; s: V3; c: string; radius?: number; boucle?: boolean }) {
+  const rad = Math.min(radius, Math.min(...s) / 2 - 0.002)
   return (
-    <mesh position={p} castShadow receiveShadow>
+    <RoundedBox args={s} radius={rad} smoothness={5} position={p} castShadow receiveShadow>
+      <meshStandardMaterial color={c} roughness={1} bumpMap={boucle ? boucleBumpTexture() : fabricBumpTexture()} bumpScale={boucle ? 2.5 : 0.6} />
+    </RoundedBox>
+  )
+}
+
+function Cyl({ p, rt, rb = rt, h, c, r = 0.6, m = 0, seg = 24, rot }: { p: V3; rt: number; rb?: number; h: number; c: string; r?: number; m?: number; seg?: number; rot?: V3 }) {
+  return (
+    <mesh position={p} rotation={rot} castShadow receiveShadow>
       <cylinderGeometry args={[rt, rb, h, seg]} />
       <meshStandardMaterial color={c} roughness={r} metalness={m} />
     </mesh>
@@ -311,7 +363,7 @@ function Fireplace({ e, pal }: { e: CatalogEntry; pal: Palette }) {
       <Box p={[0, h + 0.03, 0.02]} s={[w + 0.1, 0.06, d + 0.06]} c={pal.wood} r={0.5} />
       <Box p={[0, 0.38, d / 2 - 0.08]} s={[w * 0.55, 0.56, 0.18]} c={DARK} r={0.9} />
       <Ball p={[0, 0.2, d / 2 - 0.1]} rad={0.09} c="#ff8a3d" sy={1.6} />
-      <pointLight position={[0, 0.35, d / 2 + 0.1]} intensity={0.6} distance={2.5} color="#ff9a52" />
+      <LampLight position={[0, 0.35, d / 2 + 0.1]} day={0.6} night={3} distance={3} color="#ff9a52" />
     </group>
   )
 }
@@ -487,73 +539,436 @@ function FloorLamp({ e, pal }: { e: CatalogEntry; pal: Palette }) {
       <Cyl p={[0, h / 2, 0]} rt={0.012} h={h - 0.2} c={pal.metal} r={0.3} m={0.7} />
       <mesh position={[0, h - 0.13, 0]} castShadow>
         <cylinderGeometry args={[0.13, w / 2, 0.28, 32, 1, true]} />
-        <meshStandardMaterial color="#f5ead6" emissive="#ffdca0" emissiveIntensity={0.35} side={2} roughness={0.9} />
+        <GlowMaterial color="#f5ead6" />
       </mesh>
-      <pointLight position={[0, h - 0.2, 0]} intensity={0.8} distance={4} color="#ffd9a0" />
+      <LampLight position={[0, h - 0.2, 0]} day={0.6} night={5} distance={5} />
     </group>
   )
 }
 
-export function ProceduralItem({ e, pal, mainColor }: { e: CatalogEntry; pal: Palette; mainColor: string }) {
-  const p = { ...pal, main: mainColor }
+/** A lamp's light source: subtle by day, the main light in Evening mode. */
+function LampLight({ position, day, night, distance, color = '#ffd9a0' }: { position: V3; day: number; night: number; distance: number; color?: string }) {
+  const { evening } = useContext(Ctx)
+  return <pointLight position={position} intensity={evening ? night : day} distance={distance} decay={1.6} color={color} />
+}
+
+/** Lamp shade / glass that glows in Evening mode. */
+function GlowMaterial({ color = '#fff6e6' }: { color?: string }) {
+  const { evening } = useContext(Ctx)
+  return <meshStandardMaterial color={color} emissive="#ffdca0" emissiveIntensity={evening ? 1.6 : 0.25} side={THREE.DoubleSide} roughness={0.9} />
+}
+
+// ---------------------------------------------------------------- Modern pieces
+
+function SlatPanel({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  const pitch = 0.045
+  const slatW = 0.027
+  const n = Math.max(1, Math.floor((w - slatW) / pitch) + 1)
+  const start = -((n - 1) * pitch) / 2
+  return (
+    <group>
+      {/* acoustic felt backing */}
+      <Box p={[0, h / 2, -d / 2 + 0.006]} s={[w, h, 0.012]} c="#232427" r={0.95} />
+      {Array.from({ length: n }, (_, i) => (
+        <Box key={i} p={[start + i * pitch, h / 2, 0.003]} s={[slatW, h, d - 0.006]} c={pal.wood} />
+      ))}
+    </group>
+  )
+}
+
+function MediaWall({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d } = e
+  const { evening } = useContext(Ctx)
+  const tvW = Math.min(1.45, w - 0.3)
+  return (
+    <group>
+      {/* floating console */}
+      <Box p={[0, 0.46, 0]} s={[w, 0.32, d]} c={pal.wood} />
+      <Box p={[0, 0.46, d / 2 + 0.002]} s={[w - 0.02, 0.005, 0.002]} c="#1a1a1a" />
+      {[-1, 0, 1].map((i) => (
+        <Box key={i} p={[(i * w) / 3, 0.46, d / 2 + 0.001]} s={[0.003, 0.3, 0.003]} c="#1a1a1a" />
+      ))}
+      {/* warm LED strip under the console */}
+      <mesh position={[0, 0.296, -d / 2 + 0.08]}>
+        <boxGeometry args={[w - 0.1, 0.008, 0.02]} />
+        <meshStandardMaterial color="#ffe2b0" emissive="#ffc675" emissiveIntensity={evening ? 3 : 0.6} />
+      </mesh>
+      {/* TV on the wall */}
+      <Box p={[0, 1.27, -d / 2 + 0.025]} s={[tvW, tvW * 0.575, 0.03]} c={DARK} r={0.2} m={0.2} />
+      <mesh position={[0, 1.27, -d / 2 + 0.041]}>
+        <planeGeometry args={[tvW - 0.02, tvW * 0.575 - 0.02]} />
+        <meshStandardMaterial color="#07090d" roughness={0.08} metalness={0.5} />
+      </mesh>
+      <Ball p={[w / 2 - 0.18, 0.68, 0]} rad={0.06} c={pal.accent} sy={1.4} />
+      <Box p={[-w / 2 + 0.25, 0.65, 0.02]} s={[0.22, 0.06, 0.16]} c={pal.accent} r={0.8} />
+    </group>
+  )
+}
+
+function CloudSofa({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  const seats = Math.max(1, Math.round(w / 0.85))
+  const sw = w / seats
+  const c = pal.main
+  return (
+    <group>
+      <Soft p={[0, 0.2, 0]} s={[w, 0.4, d]} c={c} radius={0.12} />
+      {Array.from({ length: seats }, (_, i) => (
+        <group key={i}>
+          <Soft p={[-w / 2 + sw * (i + 0.5), 0.47, 0.1]} s={[sw - 0.03, 0.17, d - 0.32]} c={c} radius={0.08} />
+          <Soft p={[-w / 2 + sw * (i + 0.5), (h + 0.38) / 2, -d / 2 + 0.17]} s={[sw - 0.03, h - 0.36, 0.3]} c={c} radius={0.12} />
+        </group>
+      ))}
+      <Soft p={[-w / 2 + 0.3, 0.68, -d / 2 + 0.38]} s={[0.42, 0.38, 0.13]} c={pal.accent} radius={0.06} />
+    </group>
+  )
+}
+
+function BoucleChair({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  const c = pal.main
+  return (
+    <group>
+      <Soft p={[0, 0.2, 0.03]} s={[w * 0.9, 0.4, d * 0.88]} c={c} radius={0.16} boucle />
+      <Soft p={[0, 0.46, 0.1]} s={[w * 0.66, 0.14, d * 0.58]} c={c} radius={0.06} boucle />
+      <Soft p={[0, (h + 0.3) / 2, -d / 2 + 0.14]} s={[w, h - 0.3, 0.28]} c={c} radius={0.13} boucle />
+      <Soft p={[-w / 2 + 0.12, 0.5, 0]} s={[0.24, 0.32, d * 0.8]} c={c} radius={0.11} boucle />
+      <Soft p={[w / 2 - 0.12, 0.5, 0]} s={[0.24, 0.32, d * 0.8]} c={c} radius={0.11} boucle />
+    </group>
+  )
+}
+
+function MarbleTable({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, h } = e
+  const marble = useMemo(() => {
+    const t = floorTexture('marble').clone()
+    t.repeat.set(0.6, 0.6)
+    t.needsUpdate = true
+    return t
+  }, [])
+  return (
+    <group>
+      <mesh position={[0, h - 0.02, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[w / 2, w / 2, 0.04, 64]} />
+        <meshStandardMaterial color={pal.main} map={marble} roughness={0.2} />
+      </mesh>
+      <mesh position={[0, (h - 0.04) / 2, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.13, 0.28, h - 0.04, 48]} />
+        <meshStandardMaterial color={pal.main} map={marble} roughness={0.25} />
+      </mesh>
+      <Ball p={[0.15, h + 0.07, -0.1]} rad={0.08} c={pal.accent} sy={1.2} />
+    </group>
+  )
+}
+
+function SideTable({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, h } = e
+  return (
+    <group>
+      <Cyl p={[0, h - 0.012, 0]} rt={w / 2} h={0.024} c={pal.main} r={0.35} m={0.6} seg={40} />
+      <Cyl p={[0, h / 2, 0]} rt={0.018} h={h - 0.02} c={pal.main} r={0.3} m={0.7} />
+      <Cyl p={[0, 0.01, 0]} rt={w / 3} h={0.02} c={pal.main} r={0.3} m={0.7} seg={40} />
+    </group>
+  )
+}
+
+function PlatformBed({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  return (
+    <group>
+      <Soft p={[0, 0.15, 0.03]} s={[w, 0.3, d - 0.06]} c={pal.main} radius={0.05} />
+      <Soft p={[0, h / 2, -d / 2 + 0.06]} s={[w + 0.1, h, 0.12]} c={pal.main} radius={0.05} />
+      <Box p={[0, 0.39, 0.06]} s={[w - 0.08, 0.2, d - 0.18]} c={PORCELAIN} r={0.95} />
+      <Soft p={[0, 0.51, 0.32]} s={[w - 0.02, 0.07, d * 0.62]} c={pal.fabric} radius={0.03} />
+      <Soft p={[-w / 4, 0.57, -d / 2 + 0.36]} s={[w / 2 - 0.14, 0.14, 0.4]} c={WHITE} radius={0.06} />
+      <Soft p={[w / 4, 0.57, -d / 2 + 0.36]} s={[w / 2 - 0.14, 0.14, 0.4]} c={WHITE} radius={0.06} />
+      <Soft p={[0, 0.56, d / 2 - 0.45]} s={[w + 0.02, 0.04, 0.42]} c={pal.accent} radius={0.015} />
+    </group>
+  )
+}
+
+function SlidingWardrobe({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  return (
+    <group>
+      <Box p={[0, h / 2, -0.03]} s={[w, h, d - 0.06]} c={pal.wood} />
+      {[-1, 1].map((side, i) => (
+        <group key={side}>
+          <Box p={[(side * w) / 4, h / 2, d / 2 - 0.045 + i * 0.025]} s={[w / 2 + 0.02, h - 0.04, 0.02]} c={pal.wood} />
+          <Box p={[side * (w / 2 - 0.05) * (i ? 0.02 : 1), h / 2, d / 2 - 0.03 + i * 0.025]} s={[0.015, h * 0.5, 0.012]} c={pal.metal} r={0.3} m={0.6} />
+        </group>
+      ))}
+    </group>
+  )
+}
+
+function GlobePendant({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w } = e
+  const r = w / 2
+  return (
+    <group>
+      <mesh position={[0, r, 0]} castShadow>
+        <sphereGeometry args={[r, 32, 24]} />
+        <GlowMaterial />
+      </mesh>
+      <Cyl p={[0, 2 * r + 0.02, 0]} rt={0.03} h={0.04} c={pal.main} r={0.3} m={0.7} />
+      <Cord top={2 * r + 0.04} color={pal.main} />
+      <LampLight position={[0, r - 0.05, 0]} day={0.5} night={6} distance={6} />
+    </group>
+  )
+}
+
+function LinearPendant({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  return (
+    <group>
+      <Box p={[0, h / 2, 0]} s={[w, h, d]} c={pal.main} r={0.35} m={0.6} />
+      <mesh position={[0, 0.001, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[w - 0.04, d - 0.03]} />
+        <GlowMaterial />
+      </mesh>
+      {[-1, 1].map((s) => (
+        <Cord key={s} x={s * w * 0.4} top={h} color={pal.main} />
+      ))}
+      <LampLight position={[0, -0.1, 0]} day={0.5} night={6} distance={5} />
+    </group>
+  )
+}
+
+function ArcLamp({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, h } = e
+  const x0 = -w / 2 + 0.17
+  const tube = useMemo(() => {
+    const curve = new THREE.CubicBezierCurve3(
+      new THREE.Vector3(x0, 0.08, 0),
+      new THREE.Vector3(x0, h * 0.95, 0),
+      new THREE.Vector3(w / 2 - 0.4, h + 0.05, 0),
+      new THREE.Vector3(w / 2 - 0.18, h - 0.2, 0),
+    )
+    return new THREE.TubeGeometry(curve, 64, 0.012, 8, false)
+  }, [w, h, x0])
+  return (
+    <group>
+      <Box p={[x0, 0.04, 0]} s={[0.3, 0.08, 0.3]} c="#e6e2dc" r={0.25} />
+      <mesh geometry={tube} castShadow>
+        <meshStandardMaterial color={pal.main} roughness={0.3} metalness={0.8} />
+      </mesh>
+      <mesh position={[w / 2 - 0.18, h - 0.32, 0]} castShadow>
+        <sphereGeometry args={[0.2, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+        <meshStandardMaterial color={pal.main} roughness={0.35} metalness={0.7} side={THREE.DoubleSide} />
+      </mesh>
+      <LampLight position={[w / 2 - 0.18, h - 0.4, 0]} day={0.5} night={5} distance={5} />
+    </group>
+  )
+}
+
+function FloatingShelf({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d } = e
+  return (
+    <group>
+      <Box p={[0, 0.02, 0]} s={[w, 0.04, d]} c={pal.wood} />
+      {[0, 1, 2, 3].map((i) => (
+        <Box key={i} p={[-w / 2 + 0.12 + i * 0.04, 0.15, -0.01]} s={[0.03, 0.2 + (i % 2) * 0.03, d - 0.06]} c={[pal.accent, '#d8c9a8', pal.main, '#355070'][i]} r={0.8} />
+      ))}
+      <Cyl p={[w / 4, 0.12, 0]} rt={0.05} rb={0.04} h={0.16} c="#f1ede6" r={0.4} />
+      <Ball p={[w / 4, 0.25, 0]} rad={0.06} c={LEAF} sy={0.8} />
+    </group>
+  )
+}
+
+function RoundMirror({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  return (
+    <group position={[0, h / 2, 0]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh castShadow>
+        <cylinderGeometry args={[w / 2, w / 2, d, 64]} />
+        <meshStandardMaterial color={pal.main} roughness={0.3} metalness={0.8} />
+      </mesh>
+      <mesh position={[0, d / 2 + 0.001, 0]}>
+        <cylinderGeometry args={[w / 2 - 0.025, w / 2 - 0.025, 0.002, 64]} />
+        <meshStandardMaterial color="#dfe7ea" roughness={0.03} metalness={1} />
+      </mesh>
+    </group>
+  )
+}
+
+function WallArt({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  const tex = artTexture(pal.main, pal.accent, pal.wood)
+  return (
+    <group>
+      <Box p={[0, h / 2, 0]} s={[w, h, d]} c="#1f1f1f" r={0.5} />
+      <mesh position={[0, h / 2, d / 2 + 0.001]}>
+        <planeGeometry args={[w - 0.06, h - 0.06]} />
+        <meshStandardMaterial map={tex} roughness={0.9} />
+      </mesh>
+    </group>
+  )
+}
+
+function Curtains({ e, pal }: { e: CatalogEntry; pal: Palette }) {
+  const { w, d, h } = e
+  const panelW = Math.max(0.4, w * 0.28)
+  const geo = useMemo(() => {
+    const g = new THREE.PlaneGeometry(panelW, h - 0.08, 48, 1)
+    const pos = g.attributes.position
+    for (let i = 0; i < pos.count; i++) pos.setZ(i, Math.sin((pos.getX(i) / panelW) * Math.PI * 9) * 0.035)
+    g.computeVertexNormals()
+    return g
+  }, [panelW, h])
+  return (
+    <group>
+      <Cyl p={[0, h - 0.04, 0]} rt={0.012} h={w} c={pal.metal} r={0.3} m={0.7} rot={[0, 0, Math.PI / 2]} />
+      {[-1, 1].map((s) => (
+        <mesh key={s} geometry={geo} position={[s * (w / 2 - panelW / 2), (h - 0.08) / 2, -d / 2 + 0.05]} castShadow receiveShadow>
+          <meshStandardMaterial color={pal.main} roughness={1} side={THREE.DoubleSide} bumpMap={fabricBumpTexture()} bumpScale={0.4} />
+        </mesh>
+      ))}
+    </group>
+  )
+}
+
+function Monstera({ e }: { e: CatalogEntry }) {
+  const { w, h } = e
+  const potH = 0.32
+  const leaves = useMemo(
+    () =>
+      Array.from({ length: 11 }, (_, i) => {
+        const a = (i / 11) * Math.PI * 2 + (i % 3) * 0.3
+        const lean = 0.5 + (i % 4) * 0.12
+        const len = (h - potH) * (0.55 + ((i * 37) % 10) / 25)
+        return { a, lean, len }
+      }),
+    [h],
+  )
+  return (
+    <group>
+      <Cyl p={[0, potH / 2, 0]} rt={w * 0.22} rb={w * 0.18} h={potH} c="#e9e4dc" r={0.5} />
+      {leaves.map(({ a, lean, len }, i) => {
+        const tip = new THREE.Vector3(Math.cos(a) * Math.sin(lean) * len, potH + Math.cos(lean) * len, Math.sin(a) * Math.sin(lean) * len)
+        return (
+          <group key={i}>
+            <mesh position={[tip.x / 2, (potH + tip.y) / 2, tip.z / 2]} rotation={[Math.sin(a) * lean, 0, -Math.cos(a) * lean]}>
+              <cylinderGeometry args={[0.006, 0.008, len, 5]} />
+              <meshStandardMaterial color="#4c6b3a" roughness={0.8} />
+            </mesh>
+            <mesh position={[tip.x, tip.y, tip.z]} rotation={[Math.sin(a) * (lean + 0.6), a, -Math.cos(a) * (lean + 0.6)]} scale={[1, 0.12, 0.75]} castShadow>
+              <sphereGeometry args={[w * 0.17, 16, 10]} />
+              <meshStandardMaterial color={i % 3 ? '#2f5d34' : '#3d7042'} roughness={0.55} side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+        )
+      })}
+    </group>
+  )
+}
+
+/** Picks the generator for an entry (user products reuse a built-in shape via `builder`). */
+function build(e: CatalogEntry, p: Palette, mainColor: string): [ReactNode, Palette] {
+  const withWood = { ...p, wood: mainColor }
+  const withMetal = { ...p, metal: mainColor }
   switch (e.id) {
     case 'sofa3':
     case 'sofa2':
-      return <Sofa e={e} pal={p} />
+      return [<Sofa e={e} pal={p} />, p]
     case 'sectional':
-      return <Sectional e={e} pal={p} />
+      return [<Sectional e={e} pal={p} />, p]
     case 'armchair':
-      return <Armchair e={e} pal={p} />
+      return [<Armchair e={e} pal={p} />, p]
     case 'coffeeTable':
     case 'diningTable6':
     case 'diningTable4':
     case 'desk':
-      return <Table e={e} pal={{ ...p, wood: mainColor }} />
+      return [<Table e={e} pal={withWood} />, withWood]
     case 'roundCoffee':
     case 'roundDining':
-      return <RoundTable e={e} pal={{ ...p, wood: mainColor }} />
+      return [<RoundTable e={e} pal={withWood} />, withWood]
     case 'diningChair':
-      return <DiningChair e={e} pal={{ ...p, wood: mainColor }} />
+      return [<DiningChair e={e} pal={withWood} />, withWood]
     case 'barStool':
-      return <BarStool e={e} pal={{ ...p, metal: mainColor }} />
+      return [<BarStool e={e} pal={withMetal} />, withMetal]
     case 'officeChair':
-      return <OfficeChair e={e} pal={{ ...p, metal: mainColor }} />
+      return [<OfficeChair e={e} pal={withMetal} />, withMetal]
     case 'bedKing':
     case 'bedDouble':
     case 'bedSingle':
-      return <Bed e={e} pal={p} />
+      return [<Bed e={e} pal={p} />, p]
     case 'bookshelf':
-      return <Bookshelf e={e} pal={{ ...p, wood: mainColor }} />
+      return [<Bookshelf e={e} pal={withWood} />, withWood]
     case 'tvUnit':
-      return <TvUnit e={e} pal={{ ...p, wood: mainColor }} />
+      return [<TvUnit e={e} pal={withWood} />, withWood]
     case 'fireplace':
-      return <Fireplace e={e} pal={p} />
+      return [<Fireplace e={e} pal={p} />, p]
     case 'kitchenRun':
-      return <KitchenRun e={e} pal={p} color={mainColor} />
+      return [<KitchenRun e={e} pal={p} color={mainColor} />, p]
     case 'kitchenSink':
     case 'vanity':
-      return <Vanity e={e} pal={p} color={mainColor} />
+      return [<Vanity e={e} pal={p} color={mainColor} />, p]
     case 'stove':
-      return <Stove e={e} pal={{ ...p, metal: mainColor }} />
+      return [<Stove e={e} pal={withMetal} />, withMetal]
     case 'fridge':
-      return <Fridge e={e} pal={p} />
+      return [<Fridge e={e} pal={p} />, p]
     case 'island':
-      return <Island e={e} pal={p} color={mainColor} />
+      return [<Island e={e} pal={p} color={mainColor} />, p]
     case 'bathtub':
-      return <Bathtub e={e} />
+      return [<Bathtub e={e} />, p]
     case 'shower':
-      return <Shower e={e} />
+      return [<Shower e={e} />, p]
     case 'toilet':
-      return <Toilet e={e} />
+      return [<Toilet e={e} />, p]
     case 'rugRect':
     case 'rugRound':
-      return <Rug e={e} pal={{ ...p, accent: mainColor }} />
+      return [<Rug e={e} pal={{ ...p, accent: mainColor }} />, p]
     case 'plantTall':
     case 'plantSmall':
-      return <Plant e={e} />
+      return [<Plant e={e} />, p]
     case 'floorLamp':
-      return <FloorLamp e={e} pal={{ ...p, metal: mainColor }} />
-    default:
-      return <Cabinet e={e} pal={p} color={mainColor} />
+      return [<FloorLamp e={e} pal={withMetal} />, withMetal]
+    // Modern
+    case 'slatPanel':
+    case 'slatWall':
+      return [<SlatPanel e={e} pal={withWood} />, withWood]
+    case 'mediaWall':
+      return [<MediaWall e={e} pal={withWood} />, withWood]
+    case 'cloudSofa':
+      return [<CloudSofa e={e} pal={p} />, p]
+    case 'boucleChair':
+      return [<BoucleChair e={e} pal={p} />, p]
+    case 'marbleTable':
+      return [<MarbleTable e={e} pal={p} />, p]
+    case 'sideTable':
+      return [<SideTable e={e} pal={p} />, p]
+    case 'platformBed':
+      return [<PlatformBed e={e} pal={p} />, p]
+    case 'slidingWardrobe':
+      return [<SlidingWardrobe e={e} pal={withWood} />, withWood]
+    case 'globePendant':
+      return [<GlobePendant e={e} pal={p} />, p]
+    case 'linearPendant':
+      return [<LinearPendant e={e} pal={p} />, p]
+    case 'arcLamp':
+      return [<ArcLamp e={e} pal={p} />, p]
+    case 'floatingShelf':
+      return [<FloatingShelf e={e} pal={withWood} />, withWood]
+    case 'roundMirror':
+      return [<RoundMirror e={e} pal={p} />, p]
+    case 'wallArt':
+      return [<WallArt e={e} pal={{ ...p, main: mainColor }} />, p]
+    case 'curtains':
+      return [<Curtains e={e} pal={p} />, p]
+    case 'monstera':
+      return [<Monstera e={e} />, p]
+    default: {
+      const cabinetPal = e.colorRole === 'wood' || e.builder ? withWood : p
+      return [<Cabinet e={e} pal={cabinetPal} color={mainColor} />, cabinetPal]
+    }
   }
+}
+
+export function ProceduralItem({ e, pal, mainColor, evening = false, elevation = 0 }: { e: CatalogEntry; pal: Palette; mainColor: string; evening?: boolean; elevation?: number }) {
+  // User products draw with a built-in generator but keep their own dimensions.
+  const entry = e.builder ? { ...e, id: e.builder } : e
+  const [node, used] = build(entry, { ...pal, main: mainColor }, mainColor)
+  return <Ctx.Provider value={{ wood: e.plain && used.wood === mainColor ? '' : used.wood, evening, elevation }}>{node}</Ctx.Provider>
 }
