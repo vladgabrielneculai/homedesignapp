@@ -2,13 +2,13 @@ import { use, useEffect, useMemo } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { EffectComposerContext } from '@react-three/postprocessing'
-import { BlendFunction, Effect, EffectAttribute } from 'postprocessing'
+import { BlendFunction, Effect, EffectAttribute, ShaderPass } from 'postprocessing'
 
 /**
  * Display styles for the 3D view, like SketchUp's Styles: from the realistic look to edge-drawn
  * styles (black edges and profiles over plain or colored faces).
  */
-export type ViewStyle = 'realistic' | 'shaded' | 'sketchup' | 'hidden' | 'xray' | 'mono' | 'sketchy'
+export type ViewStyle = 'raytraced' | 'realistic' | 'shaded' | 'sketchup' | 'hidden' | 'xray' | 'mono' | 'sketchy'
 
 export interface ViewStyleInfo {
   id: ViewStyle
@@ -22,6 +22,7 @@ export interface ViewStyleInfo {
 }
 
 export const VIEW_STYLES: ViewStyleInfo[] = [
+  { id: 'raytraced', name: 'Ray-traced', hint: 'Photo-real light: real bounced daylight, soft shadows and reflections. The view refines whenever the camera stops moving (best with a dedicated graphics card)', edges: false, background: ['', ''] },
   { id: 'realistic', name: 'Realistic', hint: 'Sun, soft shadows, ambient occlusion and film tone mapping', edges: false, background: ['', ''] },
   { id: 'shaded', name: 'Shaded', hint: 'Colors and textures with simple lighting (fast)', edges: false, background: ['', ''] },
   { id: 'sketchup', name: 'SketchUp', hint: 'Colored faces with black edges and profiles, sky gradient', edges: true, background: ['#9fc2e4', '#eef3f7'] },
@@ -187,4 +188,36 @@ export function StyleMaterials({ faces }: { faces: NonNullable<ViewStyleInfo['fa
     [mats],
   )
   return null
+}
+
+/**
+ * Replaces invalid pixels (NaN or infinite, e.g. from a degenerate surface normal) with black before
+ * the other effects: otherwise bloom's blur spreads a single bad pixel over the whole picture.
+ */
+export function SanitizePixels() {
+  const pass = useMemo(
+    () =>
+      new ShaderPass(
+        new THREE.ShaderMaterial({
+          name: 'SanitizePixels',
+          uniforms: { inputBuffer: { value: null } },
+          vertexShader: 'varying vec2 vUv; void main() { vUv = position.xy * 0.5 + 0.5; gl_Position = vec4(position.xy, 1.0, 1.0); }',
+          fragmentShader: /* glsl */ `
+            uniform sampler2D inputBuffer;
+            varying vec2 vUv;
+            void main() {
+              vec4 c = texture2D(inputBuffer, vUv);
+              bool bad = any(isnan(c)) || any(isinf(c));
+              gl_FragColor = bad ? vec4(0.0, 0.0, 0.0, 1.0) : max(c, vec4(0.0));
+            }
+          `,
+          depthWrite: false,
+          depthTest: false,
+        }),
+        'inputBuffer',
+      ),
+    [],
+  )
+  useEffect(() => () => pass.dispose(), [pass])
+  return <primitive object={pass} />
 }

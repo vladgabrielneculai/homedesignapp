@@ -122,7 +122,7 @@ export function PhotoDialog({ viewId, name, onClose }: { viewId: string; name: s
                   jobRef.current?.setDenoise(e.target.checked)
                 }}
               />{' '}
-              Smooth noise
+              Denoise
             </label>
             <div className="segmented small">
               {SIZES.map((s) => (

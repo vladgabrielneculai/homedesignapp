@@ -163,20 +163,57 @@ export function Ground({ center, radius, night }: { center: THREE.Vector3; radiu
   )
 }
 
+/**
+ * Leafy canopy: a sphere with lumpy, noise-displaced surface, smooth shading and color varying from
+ * sunlit tips to darker shaded hollows, so trees read as foliage rather than faceted gems.
+ */
+const foliageCache = new Map<string, THREE.BufferGeometry>()
+function foliage(seed: number, color: string): THREE.BufferGeometry {
+  const key = `${seed}:${color}`
+  let g = foliageCache.get(key)
+  if (g) return g
+  g = new THREE.IcosahedronGeometry(1, 4)
+  const pos = g.attributes.position
+  const base = new THREE.Color(color)
+  const light = base.clone().lerp(new THREE.Color('#b9c97a'), 0.35)
+  const dark = base.clone().multiplyScalar(0.45)
+  const colors: number[] = []
+  const v = new THREE.Vector3()
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i)
+    const n =
+      Math.sin(v.x * 3.1 + seed) * Math.sin(v.y * 2.7 + seed * 1.7) * Math.sin(v.z * 3.4 + seed * 0.6) * 0.16 +
+      Math.sin(v.x * 9.3 + seed * 2.1) * Math.sin(v.y * 8.1) * Math.sin(v.z * 9.7 + seed) * 0.05
+    const r = 1 + n
+    pos.setXYZ(i, v.x * r, v.y * r * 0.9, v.z * r)
+    // Lumps catch the light, hollows and the underside fall into shade.
+    const k = THREE.MathUtils.clamp(0.45 + n * 2.2 + v.y * 0.3, 0, 1)
+    const c = dark.clone().lerp(light, k)
+    const speck = 0.92 + ((Math.sin(i * 12.9898 + seed) * 43758.5453) % 1) * 0.08
+    colors.push(c.r * speck, c.g * speck, c.b * speck)
+  }
+  g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+  g.computeVertexNormals()
+  foliageCache.set(key, g)
+  return g
+}
+
+const leafMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 })
+const barkMaterial = new THREE.MeshStandardMaterial({ color: '#5e4a3b', roughness: 1 })
+const pineMaterial = new THREE.MeshStandardMaterial({ color: '#2f4a35', roughness: 0.95 })
+
 function Tree({ x, z, s, kind }: { x: number; z: number; s: number; kind: number }) {
   const leaf = ['#4c6b3a', '#5a7a3f', '#3f5f37'][kind % 3]
   if (kind % 4 === 3) {
     // conifer
     return (
       <group position={[x, 0, z]} scale={s}>
-        <mesh position={[0, 0.6, 0]} castShadow>
-          <cylinderGeometry args={[0.08, 0.12, 1.2, 8]} />
-          <meshStandardMaterial color="#5b4636" roughness={1} />
+        <mesh position={[0, 0.6, 0]} material={barkMaterial} castShadow>
+          <cylinderGeometry args={[0.08, 0.12, 1.2, 10]} />
         </mesh>
-        {[0, 1, 2].map((i) => (
-          <mesh key={i} position={[0, 1.4 + i * 0.9, 0]} castShadow>
-            <coneGeometry args={[1.25 - i * 0.32, 1.8, 10]} />
-            <meshStandardMaterial color="#35513a" roughness={0.95} flatShading />
+        {[0, 1, 2, 3].map((i) => (
+          <mesh key={i} position={[0, 1.2 + i * 0.75, 0]} material={pineMaterial} castShadow>
+            <coneGeometry args={[1.3 - i * 0.28, 1.7, 18]} />
           </mesh>
         ))}
       </group>
@@ -184,9 +221,8 @@ function Tree({ x, z, s, kind }: { x: number; z: number; s: number; kind: number
   }
   return (
     <group position={[x, 0, z]} scale={s}>
-      <mesh position={[0, 1.1, 0]} castShadow>
-        <cylinderGeometry args={[0.1, 0.16, 2.2, 8]} />
-        <meshStandardMaterial color="#6b5544" roughness={1} />
+      <mesh position={[0, 1.1, 0]} material={barkMaterial} castShadow>
+        <cylinderGeometry args={[0.09, 0.16, 2.2, 10]} />
       </mesh>
       {[
         [0, 2.9, 0, 1.35],
@@ -194,22 +230,14 @@ function Tree({ x, z, s, kind }: { x: number; z: number; s: number; kind: number
         [-0.6, 2.6, -0.3, 1.0],
         [0.1, 3.5, -0.4, 0.9],
       ].map(([px, py, pz, r], i) => (
-        <mesh key={i} position={[px, py, pz]} castShadow>
-          <icosahedronGeometry args={[r, 1]} />
-          <meshStandardMaterial color={leaf} roughness={0.95} flatShading />
-        </mesh>
+        <mesh key={i} geometry={foliage(kind * 7 + i, leaf)} material={leafMaterial} position={[px, py, pz]} scale={r} castShadow receiveShadow />
       ))}
     </group>
   )
 }
 
 function Bush({ x, z, s }: { x: number; z: number; s: number }) {
-  return (
-    <mesh position={[x, 0.35 * s, z]} scale={[s, s * 0.75, s]} castShadow>
-      <icosahedronGeometry args={[0.55, 1]} />
-      <meshStandardMaterial color="#4d6b3b" roughness={1} flatShading />
-    </mesh>
-  )
+  return <mesh geometry={foliage(Math.round(x * 10 + z), '#4d6b3b')} material={leafMaterial} position={[x, 0.32 * s, z]} scale={[0.55 * s, 0.42 * s, 0.55 * s]} castShadow receiveShadow />
 }
 
 /** A few trees and shrubs scattered around (never on) the house, so windows look out onto something. */

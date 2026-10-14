@@ -37,10 +37,23 @@ in 3D. You can try different styles, keep several design variants side by side, 
   placed astronomically, so you can check how light enters a room on a winter morning or a summer evening. The house
   sits on a lawn with trees under a physically based sky with clouds. After sunset, lamps and ceiling lights switch on.
   A compass on the plan shows north.
-- **Realistic rendering**: ambient occlusion, bloom on lights, neutral tone mapping that keeps colors accurate, soft
-  sun shadows, floors with surface relief and varied gloss, rounded upholstery with fabric and bouclé textures, wood
-  grain and skirting boards. In eye-level view the rooms get ceilings with light fixtures, so daylight only comes in
-  through the windows. You can switch off *Realistic* on slow computers.
+- **Ray-traced 3D view** (the default style): whenever the camera stops moving, the view switches to path tracing
+  ([three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer)). Daylight bounces between walls,
+  floor and furniture, colors bleed, shadows are soft, and glossy surfaces show real reflections. The image refines
+  over a few seconds, and a small badge shows the progress. While you orbit, walk, edit or have something selected,
+  the fast real-time view is shown and tracing restarts afterwards. Indoors, each window gets a *sky portal*, as in
+  V-Ray and Corona, so light from the window is found quickly. The remaining grain is removed by an
+  AI denoiser: Intel Open Image Denoise, the one in Blender, V-Ray and Corona, running on the graphics card
+  through WebGPU in Chrome and Edge. It uses the surface colors and directions to tell real detail from noise, so the
+  image is clean after a few dozen samples. Browsers without WebGPU fall back to a firefly filter and an edge-aware
+  smoothing filter. Photo renders use the same denoiser. It needs a reasonably modern graphics card; on slow computers choose *Realistic* or *Shaded* in the
+  style menu.
+- **Realistic real-time rendering**: ambient occlusion, bloom on lights, neutral tone mapping that keeps colors
+  accurate, and soft sun shadows. Reflections and fill light come from a real photographed interior (a Poly Haven
+  HDRI, CC0, bundled locally). Floors have surface relief and varied gloss; upholstery is rounded, with fabric and
+  bouclé textures; wood has grain, and the walls have skirting boards. In eye-level view the rooms get ceilings with light fixtures, and the
+  camera stands where an interior photographer would, at chest height with a level camera, looking across the
+  room.
 - **Photo-realistic images**: the *Photo* button (or *Export → Photo-realistic image*) path-traces the current view
   with [three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer). Light bounces around the rooms,
   sky light comes in through the windows, and shadows and reflections are physically based. Choose Draft, Good or
@@ -59,7 +72,7 @@ in 3D. You can try different styles, keep several design variants side by side, 
   geometry, so pulling a face on one changes all of them. *Make unique* and *Explode* undo that. Shapes also show
   and drag in the 2D plan, export with the project and appear in photo renders.
 - **SketchUp navigation and styles**: the middle mouse button orbits (`Shift`+middle pans), the wheel zooms toward
-  the cursor, and *Views* gives Iso, Top, Front, Back, Left and Right cameras. The style menu switches between
+  the cursor, and *Views* gives Iso, Top, Front, Back, Left and Right cameras. The style menu switches between *Ray-traced*,
   *Realistic*, *Shaded*, *SketchUp* (black edges and profiles on a sky gradient), *Hidden line*, *X-ray*,
   *Monochrome* and *Sketchy* (pencil lines on paper).
 - **Open SketchUp files**: *Furnish → Open SketchUp model* reads `.skp` files, including 3D Warehouse downloads,
@@ -167,5 +180,8 @@ geometry operations, such as Push/Pull, live in `src/lib/solid.ts`.
 ## Credits
 
 The realistic models come from the Khronos glTF Sample Assets (CC0 / CC BY 4.0). See [CREDITS.md](CREDITS.md).
-Photo renders use [three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer) (MIT), and PDF plans
-are read with [PDF.js](https://mozilla.github.io/pdf.js/) (Apache 2.0).
+Photo renders and the ray-traced view use [three-gpu-pathtracer](https://github.com/gkjohnson/three-gpu-pathtracer)
+(MIT). PDF plans are read with [PDF.js](https://mozilla.github.io/pdf.js/) (Apache 2.0). The interior HDRI comes from
+[Poly Haven](https://polyhaven.com) through [@pmndrs/assets](https://github.com/pmndrs/assets) (CC0). Denoising uses
+[oidn-web](https://github.com/pissang/oidn-web) (MIT) with Intel's
+[Open Image Denoise weights](https://github.com/RenderKit/oidn-weights) (Apache 2.0, in `public/oidn`).

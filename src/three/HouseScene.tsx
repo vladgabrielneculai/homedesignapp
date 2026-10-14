@@ -32,21 +32,49 @@ export interface SceneOptions {
 }
 
 const LOW_WALL_HEIGHT = 1.0
+/** Shared empty list, so walls without openings keep their memoized geometry and materials. */
+const NO_OPENINGS: Opening[] = []
 const SKIRTING_H = 0.08
 
-/** Image-based lighting generated locally so glTF materials (sheen, transmission) look right offline. */
+/**
+ * Image-based lighting for reflections and soft fill: a real photographed interior (Poly Haven's
+ * "apartment" HDRI, CC0, bundled locally) once loaded, a generated studio room until then.
+ */
+let hdri: Promise<THREE.DataTexture> | null = null
+function loadInteriorHdri(): Promise<THREE.DataTexture> {
+  hdri ??= Promise.all([import('@pmndrs/assets/hdri/apartment.exr.js'), import('three/examples/jsm/loaders/EXRLoader.js')]).then(
+    ([file, { EXRLoader }]) => new EXRLoader().loadAsync(file.default),
+  )
+  hdri.catch(() => (hdri = null))
+  return hdri
+}
+
 export function LocalEnvironment({ intensity = 0.3 }: { intensity?: number }) {
   const { gl, scene, invalidate } = useThree()
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl)
-    const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+    let env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
     scene.environment = env
+    let alive = true
+    loadInteriorHdri().then(
+      (tex) => {
+        if (!alive) return
+        tex.mapping = THREE.EquirectangularReflectionMapping
+        const next = pmrem.fromEquirectangular(tex).texture
+        if (scene.environment === env) scene.environment = next
+        env.dispose()
+        env = next
+        invalidate()
+      },
+      () => {},
+    )
     return () => {
-      scene.environment = null
+      alive = false
+      if (scene.environment === env) scene.environment = null
       env.dispose()
       pmrem.dispose()
     }
-  }, [gl, scene])
+  }, [gl, scene, invalidate])
   useEffect(() => {
     scene.environmentIntensity = intensity
     invalidate()
@@ -244,7 +272,8 @@ function OpeningMesh({ o, len, T, H }: { o: Opening; len: number; T: number; H: 
     if (h <= 0.02) return null
     return (
       <group position={[cx, o.sill + h / 2, 0]}>
-        <mesh>
+        {/* The ray tracer puts a "sky portal" light on the glass of indoor windows (see three/tracer.ts). */}
+        <mesh userData={{ windowGlass: { w: o.width - 0.04, h: h - 0.04 } }}>
           <boxGeometry args={[o.width - 0.04, h - 0.04, 0.01]} />
           <meshPhysicalMaterial color="#bcdbe6" transparent opacity={0.28} roughness={0.02} metalness={0} />
         </mesh>
@@ -448,7 +477,7 @@ export function HouseScene({ design, options }: { design: Design; options: Scene
       {options.ceilings &&
         design.rooms.map((r) => <RoomCeiling key={r.id} room={r} height={ceilingHeight(design, r)} lit={!!options.evening} />)}
       {design.walls.map((w) => (
-        <WallMesh key={w.id} wall={w} openings={openingsByWall.get(w.id) ?? []} style={design.style} lowWalls={options.lowWalls} />
+        <WallMesh key={w.id} wall={w} openings={openingsByWall.get(w.id) ?? NO_OPENINGS} style={design.style} lowWalls={options.lowWalls} />
       ))}
       {design.items.map((it) => (
         <ItemMesh

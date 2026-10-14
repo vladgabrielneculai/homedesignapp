@@ -115,3 +115,13 @@ export function inFootprint(p: Pt, c: Pt, w: number, d: number, deg: number): bo
   const ly = dx * Math.sin(r) + dy * Math.cos(r)
   return Math.abs(lx) <= w / 2 && Math.abs(ly) <= d / 2
 }
+
+/** Distance from p to a rotated w×d rectangle centered at c (0 inside). */
+export function footprintDistance(p: Pt, c: Pt, w: number, d: number, deg: number): number {
+  const r = (-deg * Math.PI) / 180
+  const dx = p.x - c.x
+  const dy = p.y - c.y
+  const lx = Math.abs(dx * Math.cos(r) - dy * Math.sin(r)) - w / 2
+  const ly = Math.abs(dx * Math.sin(r) + dy * Math.cos(r)) - d / 2
+  return Math.hypot(Math.max(lx, 0), Math.max(ly, 0))
+}
